@@ -18,6 +18,7 @@
 
 #include <pybind11/numpy.h>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,6 +32,7 @@
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/metric/metric.pb.h"
 #include "yggdrasil_decision_forests/model/abstract_model.h"
+#include "yggdrasil_decision_forests/model/abstract_model.pb.h"
 #include "yggdrasil_decision_forests/model/decision_tree/decision_forest_interface.h"
 #include "yggdrasil_decision_forests/model/gradient_boosted_trees/gradient_boosted_trees.h"
 #include "yggdrasil_decision_forests/model/random_forest/random_forest.h"
@@ -86,6 +88,11 @@ class GenericCCModel {
     return model_->data_spec();
   }
 
+  const std::optional<model::proto::HyperparametersOptimizerLogs>&
+  hyperparameter_optimizer_logs() const {
+    return model_->hyperparameter_optimizer_logs();
+  }
+
  protected:
   std::unique_ptr<model::AbstractModel> model_;
   std::unique_ptr<serving::FastEngine> engine_;
@@ -94,6 +101,9 @@ class GenericCCModel {
 class DecisionForestCCModel : public GenericCCModel {
  public:
   int num_trees() const { return df_model_->num_trees(); }
+
+  absl::StatusOr<py::array_t<int32_t>> PredictLeaves(
+      const dataset::VerticalDataset& dataset);
 
  protected:
   // `model` and `df_model` must correspond to the same object.

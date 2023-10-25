@@ -29,10 +29,13 @@ pybind_library(
         ":pydf_models",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/types:span",
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_cc_proto",
+        "@ydf_cc//yggdrasil_decision_forests/dataset:types",
         "@ydf_cc//yggdrasil_decision_forests/dataset:vertical_dataset",
         "@ydf_cc//yggdrasil_decision_forests/metric:metric_cc_proto",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model",
+        "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_cc_proto",
         "@ydf_cc//yggdrasil_decision_forests/model:model_library",
         "@ydf_cc//yggdrasil_decision_forests/model/decision_tree:decision_forest_interface",
         "@ydf_cc//yggdrasil_decision_forests/model/gradient_boosted_trees",
@@ -87,7 +90,9 @@ py_library(
     srcs = ["decision_forest_model.py"],
     deps = [
         ":generic_model",
+        # numpy dep,
         "//ydf/cc:ydf",
+        "//ydf/dataset",
     ],
 )
 

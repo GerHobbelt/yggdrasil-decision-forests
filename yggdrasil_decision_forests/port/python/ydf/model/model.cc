@@ -77,7 +77,9 @@ void init_model(py::module_& m) {
       .def("task", &GenericCCModel::task)
       .def("data_spec", &GenericCCModel::data_spec)
       .def("Describe", &GenericCCModel::Describe, py::arg("full_details"))
-      .def("input_features", &GenericCCModel::input_features);
+      .def("input_features", &GenericCCModel::input_features)
+      .def("hyperparameter_optimizer_logs",
+           &GenericCCModel::hyperparameter_optimizer_logs);
 
   py::class_<DecisionForestCCModel,
              /*parent class*/ GenericCCModel>(m, "DecisionForestCCModel")
@@ -86,7 +88,8 @@ void init_model(py::module_& m) {
              return absl::Substitute(
                  "<model_cc.DecisionForestCCModel of type $0.", a.name());
            })
-      .def("num_trees", &DecisionForestCCModel::num_trees);
+      .def("num_trees", &DecisionForestCCModel::num_trees)
+      .def("PredictLeaves", &DecisionForestCCModel::PredictLeaves);
 
   py::class_<RandomForestCCModel,
              /*parent class*/ DecisionForestCCModel>(m, "RandomForestCCModel")
