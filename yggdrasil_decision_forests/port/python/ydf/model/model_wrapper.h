@@ -23,6 +23,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -52,6 +53,12 @@ class GenericCCModel {
   std::string name() const { return model_->name(); }
 
   model::proto::Task task() const { return model_->task(); }
+
+  std::string Describe(const bool full_details) const {
+    return model_->DescriptionAndStatistics(full_details);
+  }
+
+  std::vector<int> input_features() const { return model_->input_features(); }
 
   // Gets an engine of the model. If the engine does not exist, create it.
   // This method is not thread safe.
