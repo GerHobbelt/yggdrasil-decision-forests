@@ -102,6 +102,11 @@ class DecisionForestCCModel(GenericCCModel):
       self,
       dataset: VerticalDataset,
   ) -> npt.NDArray[np.int32]: ...
+  def Distance(
+      self,
+      dataset1: VerticalDataset,
+      dataset2: VerticalDataset,
+  ) -> npt.NDArray[np.float32]: ...
 
 class RandomForestCCModel(DecisionForestCCModel):
   @property
@@ -125,7 +130,11 @@ def ModelAnalysisCreateHtmlReport(
 # ================
 
 class GenericCCLearner:
-  def Train(self, dataset: VerticalDataset) -> ModelCCType: ...
+  def Train(
+      self,
+      dataset: VerticalDataset,
+      validation_dataset: Optional[VerticalDataset] = None,
+  ) -> ModelCCType: ...
   def Evaluate(
       self,
       dataset: VerticalDataset,
