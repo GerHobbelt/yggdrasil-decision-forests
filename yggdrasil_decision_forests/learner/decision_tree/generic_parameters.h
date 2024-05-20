@@ -61,11 +61,14 @@ constexpr char kCategoricalAlgorithmRandom[] = "RANDOM";
 constexpr char kHParamSplitAxis[] = "split_axis";
 constexpr char kHParamSplitAxisAxisAligned[] = "AXIS_ALIGNED";
 constexpr char kHParamSplitAxisSparseOblique[] = "SPARSE_OBLIQUE";
+constexpr char kHParamSplitAxisMhldOblique[] = "MHLD_OBLIQUE";
 
 constexpr char kHParamSplitAxisSparseObliqueNumProjectionsExponent[] =
     "sparse_oblique_num_projections_exponent";
 constexpr char kHParamSplitAxisSparseObliqueProjectionDensityFactor[] =
     "sparse_oblique_projection_density_factor";
+constexpr char kHParamSplitAxisSparseObliqueMaxNumProjections[] =
+    "sparse_oblique_max_num_projections";
 
 constexpr char kHParamSplitAxisSparseObliqueWeights[] =
     "sparse_oblique_weights";
@@ -78,6 +81,11 @@ constexpr char kHParamSplitAxisSparseObliqueNormalizationNone[] = "NONE";
 constexpr char kHParamSplitAxisSparseObliqueNormalizationStandardDeviation[] =
     "STANDARD_DEVIATION";
 constexpr char kHParamSplitAxisSparseObliqueNormalizationMinMax[] = "MIN_MAX";
+
+constexpr char kHParamSplitAxisMhldObliqueMaxNumAttributes[] =
+    "mhld_oblique_max_num_attributes";
+constexpr char kHParamSplitAxisMhldObliqueSampleAttributes[] =
+    "mhld_oblique_sample_attributes";
 
 constexpr char kHParamSortingStrategy[] = "sorting_strategy";
 constexpr char kHParamSortingStrategyInNode[] = "IN_NODE";

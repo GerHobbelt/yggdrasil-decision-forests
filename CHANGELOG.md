@@ -1,11 +1,14 @@
 # Changelog
 
-## HEAD
+Note: This is the changelog of the C++ library. The Python port has a separate
+Changelog under `yggdrasil_decision_forests/port/python/CHANGELOG.md`.
+
+## 1.9.0 - 2024-03-12
 
 ### Feature
 
--   Add "parallel_trials" parameter in the hyper-parameter tuner to control the
-    number of trials to run in parallel.
+-   Add "parallel_trials" parameter in the hyper-parameter tuner to control the number of trials to run in parallel.
+-   Add support for custom losses.
 
 ## 1.8.0 - 2023-11-17
 

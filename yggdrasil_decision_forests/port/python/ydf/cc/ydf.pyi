@@ -144,6 +144,8 @@ class GenericCCModel:
   def VariableImportances(
       self,
   ) -> Dict[str, abstract_model_pb2.VariableImportanceSet]: ...
+  def ForceEngine(self, engine_name: Optional[str]) -> None: ...
+  def ListCompatibleEngines(self) -> Sequence[str]: ...
 
 class DecisionForestCCModel(GenericCCModel):
   def num_trees(self) -> int: ...
@@ -225,6 +227,7 @@ class CCRegressionLoss:
           [npt.NDArray[np.float32], npt.NDArray[np.float32]],
           Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],
       ],
+      may_trigger_gc: bool,
   ): ...
 
 class CCBinaryClassificationLoss:
@@ -246,6 +249,7 @@ class CCBinaryClassificationLoss:
           [npt.NDArray[np.int32], npt.NDArray[np.float32]],
           Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],
       ],
+      may_trigger_gc: bool,
   ): ...
 
 class CCMultiClassificationLoss:
@@ -267,6 +271,7 @@ class CCMultiClassificationLoss:
           [npt.NDArray[np.int32], npt.NDArray[np.float32]],
           Tuple[npt.NDArray[np.float32], npt.NDArray[np.float32]],
       ],
+      may_trigger_gc: bool,
   ): ...
 
 class GenericCCLearner:
