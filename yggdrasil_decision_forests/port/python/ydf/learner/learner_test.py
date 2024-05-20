@@ -23,6 +23,7 @@ from absl import logging
 from absl.testing import absltest
 from absl.testing import parameterized
 import numpy as np
+import numpy.testing as npt
 import pandas as pd
 
 from yggdrasil_decision_forests.dataset import data_spec_pb2
@@ -40,6 +41,7 @@ from ydf.utils import log
 from ydf.utils import test_utils
 
 ProtoMonotonicConstraint = abstract_learner_pb2.MonotonicConstraint
+Column = dataspec.Column
 
 # TODO: Convert to dataclass.
 DatasetForTesting = collections.namedtuple(
@@ -303,7 +305,7 @@ class RandomForestLearnerTest(LearnerTest):
     # All the examples are used in the evaluation
     self.assertEqual(evaluation.num_examples, ds.shape[0])
 
-    with open("/tmp/evaluation.html", "w") as f:
+    with open(self.create_tempfile(), "w") as f:
       f.write(evaluation._repr_html_())
 
   def test_tuner_manual(self):
@@ -421,6 +423,66 @@ class RandomForestLearnerTest(LearnerTest):
         },
         learner.hyperparameters,
     )
+
+  def test_multidimensional_training_dataset(self):
+    data = {
+        "feature": np.array([[0, 1, 2, 3], [4, 5, 6, 7]]),
+        "label": np.array([0, 1]),
+    }
+    learner = specialized_learners.RandomForestLearner(label="label")
+    model = learner.train(data)
+
+    expected_columns = [
+        data_spec_pb2.Column(
+            name="feature.0_of_4",
+            type=data_spec_pb2.ColumnType.NUMERICAL,
+            count_nas=0,
+            numerical=data_spec_pb2.NumericalSpec(
+                mean=2,
+                standard_deviation=2,
+                min_value=0,
+                max_value=4,
+            ),
+        ),
+        data_spec_pb2.Column(
+            name="feature.1_of_4",
+            type=data_spec_pb2.ColumnType.NUMERICAL,
+            count_nas=0,
+            numerical=data_spec_pb2.NumericalSpec(
+                mean=3,
+                standard_deviation=2,
+                min_value=1,
+                max_value=5,
+            ),
+        ),
+        data_spec_pb2.Column(
+            name="feature.2_of_4",
+            type=data_spec_pb2.ColumnType.NUMERICAL,
+            count_nas=0,
+            numerical=data_spec_pb2.NumericalSpec(
+                mean=4,
+                standard_deviation=2,
+                min_value=2,
+                max_value=6,
+            ),
+        ),
+        data_spec_pb2.Column(
+            name="feature.3_of_4",
+            type=data_spec_pb2.ColumnType.NUMERICAL,
+            count_nas=0,
+            numerical=data_spec_pb2.NumericalSpec(
+                mean=5,
+                standard_deviation=2,
+                min_value=3,
+                max_value=7,
+            ),
+        ),
+    ]
+    # Skip the first column that contains the label.
+    self.assertEqual(model.data_spec().columns[1:], expected_columns)
+
+    predictions = model.predict(data)
+    self.assertEqual(predictions.shape, (2,))
 
 
 class CARTLearnerTest(LearnerTest):
@@ -601,6 +663,39 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
     model = learner.train(train_path)
     evaluation = model.evaluate(test_path)
     self.assertAlmostEqual(evaluation.ndcg, 0.71, places=1)
+
+  def test_predict_iris(self):
+    dataset_path = os.path.join(
+        test_utils.ydf_test_data_path(), "dataset", "iris.csv"
+    )
+    ds = pd.read_csv(dataset_path)
+    model = specialized_learners.RandomForestLearner(label="class").train(ds)
+
+    predictions = model.predict(ds)
+
+    self.assertEqual(predictions.shape, (ds.shape[0], 3))
+
+    row_sums = np.sum(predictions, axis=1)
+    # Make sure a multi-dimensional prediction always (mostly) sums to 1.
+    npt.assert_array_almost_equal(
+        row_sums, np.ones(predictions.shape[0]), decimal=5
+    )
+
+  def test_better_default_template(self):
+    ds = toy_dataset()
+    label = "label"
+    templates = (
+        specialized_learners.GradientBoostedTreesLearner.hyperparameter_templates()
+    )
+    self.assertIn("better_defaultv1", templates)
+    better_defaultv1 = templates["better_defaultv1"]
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label=label, **better_defaultv1
+    )
+    self.assertEqual(
+        learner.hyperparameters["growing_strategy"], "BEST_FIRST_GLOBAL"
+    )
+    _ = learner.train(ds)
 
 
 class LoggingTest(parameterized.TestCase):

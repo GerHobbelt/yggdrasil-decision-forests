@@ -40,12 +40,12 @@ py_library(
     srcs = ["dataset.py"],
     deps = [
         ":dataspec",
-        # absl/logging dep,
         # numpy dep,
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "//ydf/cc:ydf",
         "//ydf/dataset/io:dataset_io",
         "//ydf/dataset/io:dataset_io_types",
+        "//ydf/utils:log",
     ],
 )
 
@@ -71,9 +71,22 @@ py_test(
         # absl/testing:parameterized dep,
         # numpy dep,
         # pandas dep,
-        # tensorflow dep,
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "//ydf/utils:test_utils",
+    ],
+)
+
+py_test(
+    name = "dataset_with_tf_test",
+    srcs = ["dataset_with_tf_test.py"],
+    data = ["@ydf_cc//yggdrasil_decision_forests/test_data"],
+    python_version = "PY3",
+    deps = [
+        ":dataset",
+        # absl/testing:absltest dep,
+        # numpy dep,
+        # tensorflow dep,
+        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
     ],
 )
 

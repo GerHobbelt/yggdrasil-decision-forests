@@ -20,17 +20,20 @@ import tempfile
 import textwrap
 
 from absl.testing import absltest
+from absl.testing import parameterized
 import numpy as np
 import numpy.testing as npt
 import pandas as pd
 
+from yggdrasil_decision_forests.model.random_forest import random_forest_pb2
+from ydf.dataset import dataspec
 from ydf.model import generic_model
 from ydf.model import model_lib
 from ydf.model import random_forest_model
 from ydf.utils import test_utils
 
 
-class DecisionForestModelTest(absltest.TestCase):
+class DecisionForestModelTest(parameterized.TestCase):
 
   def test_predict_adult_rf(self):
     model_path = os.path.join(
@@ -318,6 +321,32 @@ Use `model.describe()` for more details
     benchmark_result = model.benchmark(test_df)
     print(benchmark_result)
 
+  @parameterized.parameters(x for x in generic_model.NodeFormat)
+  def test_node_format(self, node_format: generic_model.NodeFormat):
+    """Test that the node format is saved correctly."""
+    model_load_path = os.path.join(
+        test_utils.ydf_test_data_path(),
+        "model",
+        "adult_binary_class_rf",
+    )
+    model = model_lib.load_model(model_load_path)
+    model.set_node_format(node_format=node_format)
+    model_save_path = self.create_tempdir().full_path
+    model.save(
+        model_save_path,
+        advanced_options=generic_model.ModelIOOptions(file_prefix=""),
+    )
+    # Read the proto to see if the format is set correctly
+    # TODO: Consider exposing the proto directly in ydf.
+    random_forest_header = random_forest_pb2.Header()
+    random_forest_header_path = os.path.join(
+        model_save_path, "random_forest_header.pb"
+    )
+    self.assertTrue(os.path.exists(random_forest_header_path))
+    with open(random_forest_header_path, "rb") as f:
+      random_forest_header.ParseFromString(f.read())
+    self.assertEqual(random_forest_header.node_format, node_format.name)
+
 
 class RandomForestModelTest(absltest.TestCase):
 
@@ -380,6 +409,43 @@ class GradientBoostedTreesTest(absltest.TestCase):
 
     validation_loss = model.validation_loss()
     self.assertAlmostEqual(validation_loss, 0.573842942, places=6)
+
+  def test_variable_importances(self):
+    model_path = os.path.join(
+        test_utils.ydf_test_data_path(),
+        "model",
+        "synthetic_ranking_gbdt_numerical",
+    )
+    model = model_lib.load_model(model_path)
+    variable_importances = model.variable_importances()
+    self.assertEqual(
+        variable_importances,
+        {
+            "NUM_NODES": [
+                (355.0, "num_2"),
+                (326.0, "num_0"),
+                (248.0, "num_1"),
+                (193.0, "num_3"),
+            ],
+            "INV_MEAN_MIN_DEPTH": [
+                (0.54955206094026765, "num_0"),
+                (0.43300866801748344, "num_2"),
+                (0.21987296105251422, "num_1"),
+                (0.20886402442940008, "num_3"),
+            ],
+            "SUM_SCORE": [
+                (331.52462868355724, "num_0"),
+                (297.70595154801595, "num_2"),
+                (103.86176226850876, "num_1"),
+                (52.43193327602421, "num_3"),
+            ],
+            "NUM_AS_ROOT": [
+                (35.0, "num_0"),
+                (12.0, "num_2"),
+                (1.0, "num_3"),
+            ],
+        },
+    )
 
 
 if __name__ == "__main__":

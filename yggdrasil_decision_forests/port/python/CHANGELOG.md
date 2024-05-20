@@ -1,5 +1,34 @@
 # Changelog
 
+## Head
+
+##  0.0.5 - 2023-11-10
+
+### Features
+
+-   Add support for distributed training.
+-   Allow setting node format.
+-   Allow programmatic access to variable importances
+-   Support for multi-dimensional numerical features
+-   Support use of hyper-parameter templates.
+
+### Documentation
+
+-   Many new tutorials at ydf.readthedocs.io
+-   Updated FAQ
+
+### Fix
+
+-   Fix prediction array for multi-class classification.
+-   Avoid exposing proto Task type
+-   No longer expose train_from_path and train_from_dataset -- just use `train`!
+-   Correctly choose number of threads if 32 cores are detected.
+-   Logs were hanging in some configurations.
+
+#### Release music
+
+Auld Lang Syne. Traditional
+
 ## 0.0.4 - 2023-11-01
 
 ### Features
@@ -18,7 +47,7 @@
 
 ### Fix
 
--   Remove pybind11_abseil to avoid clashes with other libraries such as 
+-   Remove pybind11_abseil to avoid clashes with other libraries such as
     Tensorflow.
 
 #### Release music

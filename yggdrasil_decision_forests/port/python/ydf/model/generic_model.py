@@ -15,9 +15,10 @@
 """Generic YDF model definition."""
 
 import dataclasses
+import enum
 import os
 import tempfile
-from typing import Any, Literal, Optional, TypeVar, Union
+from typing import Any, Dict, List, Literal, Optional, Tuple, TypeVar, Union
 
 from absl import logging
 import numpy as np
@@ -27,6 +28,7 @@ from yggdrasil_decision_forests.metric import metric_pb2
 from yggdrasil_decision_forests.model import abstract_model_pb2
 from ydf.cc import ydf
 from ydf.dataset import dataset
+from ydf.dataset import dataspec
 from ydf.metric import metric
 from ydf.model import analysis
 from ydf.model import template_cpp_export
@@ -34,8 +36,64 @@ from ydf.utils import html
 from ydf.utils import log
 from yggdrasil_decision_forests.utils import model_analysis_pb2
 
-# TODO: Allow a simpler input type (e.g. string)
-Task = abstract_model_pb2.Task
+
+@enum.unique
+class Task(enum.Enum):
+  """Task solved by a model.
+
+  Usage example:
+
+  ```python
+  learner = ydf.RandomForestLearner(label="income",
+  task=ydf.Task.CLASSIFICATION)
+  model = learner.train(dataset)
+  assert model.task() == ydf.Task.CLASSIFICATION
+  ```
+  Not all tasks are compatible with all learners and/or hyperparameters. For
+  more information, please see the documentation for tutorials on the individual
+  tasks.
+
+
+  Attributes:
+    CLASSIFICATION: Predict a categorical label i.e., an item of an enumeration.
+    REGRESSION: Predict a numerical label i.e., a quantity.
+    RANKING: Rank items by label values. The label is expected to be between 0
+      and 4 with NDCG semantic (0: completely unrelated, 4: perfect match).
+    CATEGORICAL_UPLIFT: Predicts the incremental impact of a treatment on a
+      categorical outcome.
+    NUMERICAL_UPLIFT: Predicts the incremental impact of a treatment on a
+      numerical outcome.
+  """
+
+  CLASSIFICATION = "CLASSIFICATION"
+  REGRESSION = "REGRESSION"
+  RANKING = "RANKING"
+  CATEGORICAL_UPLIFT = "CATEGORICAL_UPLIFT"
+  NUMERICAL_UPLIFT = "NUMERICAL_UPLIFT"
+
+  def _to_proto_type(self) -> abstract_model_pb2.Task:
+    if self in TASK_TO_PROTO:
+      return TASK_TO_PROTO[self]
+    else:
+      raise NotImplementedError(f"Unsupported task {self}")
+
+  @classmethod
+  def _from_proto_type(cls, task: abstract_model_pb2.Task):
+    task = PROTO_TO_TASK.get(task)
+    if task is None:
+      raise NotImplementedError(f"Unsupported task {task}")
+    return task
+
+
+# Mappings between task enum in python and in protobuffer and vice versa.
+TASK_TO_PROTO = {
+    Task.CLASSIFICATION: abstract_model_pb2.CLASSIFICATION,
+    Task.REGRESSION: abstract_model_pb2.REGRESSION,
+    Task.RANKING: abstract_model_pb2.RANKING,
+    Task.CATEGORICAL_UPLIFT: abstract_model_pb2.CATEGORICAL_UPLIFT,
+    Task.NUMERICAL_UPLIFT: abstract_model_pb2.NUMERICAL_UPLIFT,
+}
+PROTO_TO_TASK = {v: k for k, v in TASK_TO_PROTO.items()}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -52,6 +110,18 @@ class ModelIOOptions:
 
   file_prefix: Optional[str] = None
 
+@enum.unique
+class NodeFormat(enum.Enum):
+  """Serialization format for a model.
+
+  Determines the storage format for nodes.
+
+  Attributes:
+    BLOB_SEQUENCE: Default format for the public version of YDF.
+  """
+
+  BLOB_SEQUENCE = enum.auto()
+
 
 class GenericModel:
   """Abstract superclass for all YDF models."""
@@ -66,7 +136,7 @@ class GenericModel:
   def task(self) -> Task:
     """Task solved by the model."""
 
-    return self._model.task()
+    return Task._from_proto_type(self._model.task())
 
   def describe(
       self,
@@ -104,7 +174,7 @@ class GenericModel:
   def __str__(self) -> str:
     return f"""\
 Model: {self.name()}
-Task: {Task.Name(self.task())}
+Task: {self.task().name}
 Class: ydf.{self.__class__.__name__}
 Use `model.describe()` for more details
 """
@@ -251,7 +321,7 @@ Use `model.describe()` for more details
 
     Args:
       data: Dataset. Can be a dictionary of list or numpy array of values,
-        Pandas DataFrame, or a VerticalDatset.
+        Pandas DataFrame, or a VerticalDataset.
       bootstrapping: Controls whether bootstrapping is used to evaluate the
         confidence intervals and statistical tests (i.e., all the metrics ending
         with "[B]"). If set to false, bootstrapping is disabled. If set to true,
@@ -282,7 +352,7 @@ Use `model.describe()` for more details
 
       options_proto = metric_pb2.EvaluationOptions(
           bootstrapping_samples=bootstrapping_samples,
-          task=self._model.task(),
+          task=self.task()._to_proto_type(),
       )
 
       evaluation_proto = self._model.Evaluate(ds._dataset, options_proto)  # pylint: disable=protected-access
@@ -304,7 +374,7 @@ Use `model.describe()` for more details
     importance, training logs), the dataset (e.g., column statistics), and the
     application of the model on the dataset (e.g. partial dependence plots).
 
-    While some information might be valid, it is generatly not recommanded to
+    While some information might be valid, it is generatly not recommended to
     analyze a model on its training dataset.
 
     Usage example:
@@ -326,7 +396,7 @@ Use `model.describe()` for more details
 
     Args:
       data: Dataset. Can be a dictionary of list or numpy array of values,
-        Pandas DataFrame, or a VerticalDatset.
+        Pandas DataFrame, or a VerticalDataset.
       sampling: Ratio of examples to use for the analysis. The analysis can be
         expensive to compute. On large datasets, use a small sampling value e.g.
         0.01.
@@ -490,6 +560,55 @@ Use `model.describe()` for more details
     """
 
     return self._model.hyperparameter_optimizer_logs()
+
+  def variable_importances(self) -> Dict[str, List[Tuple[float, str]]]:
+    """Variable importances to measure the impact of features on the model.
+
+    Variable importances generally indicates how much a variable (feature)
+    contributes to the model predictions or quality. Different Variable
+    importances have different semantics and are generally not comparable.
+
+    The variable importances returned by `variable_importances()` depends on the
+    learning algorithm and its hyper-parameters. For example, the hyperparameter
+    `compute_oob_variable_importances=True` of the Random Forest learner enables
+    the computation of permutation out-of-bag variable importances.
+
+    # TODO: Add variable importances to documentation.
+
+    Values are sorted by decreasing value/importance.
+
+    Usage example:
+
+    ```python
+    # Train a Random Forest. Enable the computation of OOB (out-of-bag) variable
+    # importances.
+    model = ydf.RandomForestModel(compute_oob_variable_importances=True,
+                                  label=...).train(ds)
+    # List the available variable importances
+    print(model.variable_importances().keys())
+
+    # Show a specific variable importance
+    model.variable_importances()["MEAN_DECREASE_IN_ACCURACY"]
+    >> [("bill_length_mm", 0.0713061951754389),
+        ("island", 0.007298519736842035),
+        ("flipper_length_mm", 0.004505893640351366),
+    ...
+    ```
+
+    Returns:
+      Variable importances.
+    """
+    variable_importances = {}
+    # Collect the variable importances stored in the model.
+    for (
+        name,
+        importance_set,
+    ) in self._model.VariableImportances().items():
+      variable_importances[name] = [
+          (src.importance, self.data_spec().columns[src.attribute_idx].name)
+          for src in importance_set.variable_importances
+      ]
+    return variable_importances
 
 
 ModelType = TypeVar("ModelType", bound=GenericModel)

@@ -19,6 +19,7 @@
 #include "pybind11_protobuf/native_proto_caster.h"
 #include "ydf/dataset/dataset.h"
 #include "ydf/learner/learner.h"
+#include "ydf/learner/worker.h"
 #include "ydf/metric/metric.h"
 #include "ydf/model/model.h"
 #include "ydf/utils/log.h"
@@ -37,6 +38,7 @@ PYBIND11_MODULE(ydf, m) {
   init_learner(m);
   init_metric(m);
   init_log(m);
+  init_worker(m);
 }
 
 }  // namespace yggdrasil_decision_forests::port::python

@@ -18,7 +18,7 @@ import copy
 import datetime
 import os
 import re
-from typing import Optional, Union
+from typing import Optional, Sequence, Union
 
 from absl import logging
 
@@ -26,7 +26,6 @@ from yggdrasil_decision_forests.dataset import data_spec_pb2
 from yggdrasil_decision_forests.dataset import weight_pb2
 from yggdrasil_decision_forests.learner import abstract_learner_pb2
 from yggdrasil_decision_forests.metric import metric_pb2
-from yggdrasil_decision_forests.model import abstract_model_pb2
 from ydf.cc import ydf
 from ydf.dataset import dataset
 from ydf.dataset import dataspec
@@ -37,6 +36,7 @@ from ydf.model import generic_model
 from ydf.model import model_lib
 from ydf.utils import log
 from yggdrasil_decision_forests.utils import fold_generator_pb2
+from yggdrasil_decision_forests.utils.distribute.implementations.grpc import grpc_pb2
 
 Task = generic_model.Task
 
@@ -74,14 +74,10 @@ class GenericLearner:
 
     if not self._label:
       raise ValueError("Constructing the learner requires a non-empty label.")
-    if not self._task or task == abstract_model_pb2.Task.UNDEFINED:
-      raise ValueError(
-          "Constructing the learner requires a task that is not undefined."
-      )
     if self._ranking_group is not None and task != Task.RANKING:
       raise ValueError(
           "The ranking group should only be specified for ranking tasks."
-          f" Got task={Task.Name(task)}"
+          f" Got task={task.name}"
       )
     if self._ranking_group is None and task == Task.RANKING:
       raise ValueError("The ranking group must be specified for ranking tasks.")
@@ -91,7 +87,7 @@ class GenericLearner:
     ]:
       raise ValueError(
           "The uplift treatment should only be specified for uplifting tasks."
-          f" Got task={Task.Name(task)}"
+          f" Got task={task.name}"
       )
     if self._uplift_treatment is None and task in [
         Task.NUMERICAL_UPLIFT,
@@ -169,15 +165,23 @@ class GenericLearner:
             "If the training dataset is a path, the validation dataset must"
             " also be a path."
         )
-      return self.train_from_path(ds, valid)
+      return self._train_from_path(ds, valid)
     if valid is not None and isinstance(valid, str):
       raise ValueError(
           "The validation dataset may only be a path if the training dataset is"
           " a path."
       )
-    return self.train_from_dataset(ds, valid)
+    return self._train_from_dataset(ds, valid)
 
-  def train_from_path(
+  def __str__(self) -> str:
+    return f"""\
+Learner: {self._learner_name}
+Task: {self._task}
+Class: ydf.{self.__class__.__name__}
+Hyper-parameters: ydf.{self._hyperparameters}
+"""
+
+  def _train_from_path(
       self, ds: str, valid: Optional[str]
   ) -> generic_model.GenericModel:
     """Trains a model from a file path (dataset reading in YDF C++)."""
@@ -191,15 +195,15 @@ class GenericLearner:
         cc_model = self._get_learner().TrainFromPathWithGuide(ds, guide, valid)
       return model_lib.load_cc_model(cc_model)
 
-  def train_from_dataset(
+  def _train_from_dataset(
       self,
       ds: dataset.InputDataset,
       valid: Optional[dataset.InputDataset] = None,
   ) -> generic_model.GenericModel:
     """Trains a model from in-memory data."""
-    
+
     with log.cc_log_context():
-      train_ds = self._get_vertical_dataset(ds)._dataset # pylint: disable=protected-access
+      train_ds = self._get_vertical_dataset(ds)._dataset  # pylint: disable=protected-access
       train_args = {"dataset": train_ds}
 
       if valid is not None:
@@ -241,7 +245,7 @@ class GenericLearner:
         weight_definition=self._build_weight_definition(),
         ranking_group=self._ranking_group,
         uplift_treatment=self._uplift_treatment,
-        task=self._task,
+        task=self._task._to_proto_type(),
     )
 
     # Apply monotonic constraints.
@@ -403,9 +407,7 @@ class GenericLearner:
       elif task in [Task.REGRESSION, Task.RANKING, Task.NUMERICAL_UPLIFT]:
         return dataspec.Column(name=name, semantic=dataspec.Semantic.NUMERICAL)
       else:
-        raise ValueError(
-            f"Unsupported task {abstract_model_pb2.Task(task)} for label column"
-        )
+        raise ValueError(f"Unsupported task {task.name} for label column")
 
     data_spec_args = copy.deepcopy(self._data_spec_args)
     # If no columns have been specified, make sure that all columns are used,
@@ -484,15 +486,27 @@ class GenericLearner:
       resume_training: bool,
       resume_training_snapshot_interval_seconds: int,
       working_dir: Optional[str],
+      workers: Optional[Sequence[str]],
   ):
+    """Merges constructor arguments into a deployment configuration."""
+
     if num_threads is None:
       num_threads = self._determine_optimal_num_threads()
-    return abstract_learner_pb2.DeploymentConfig(
+    config = abstract_learner_pb2.DeploymentConfig(
         num_threads=num_threads,
         try_resume_training=resume_training,
         cache_path=working_dir,
         resume_training_snapshot_interval_seconds=resume_training_snapshot_interval_seconds,
     )
+
+    if workers is not None:
+      if not workers:
+        raise ValueError("At least one worker should be provided")
+      config.distribute.implementation_key = "GRPC"
+      grpc_config = config.distribute.Extensions[grpc_pb2.grpc]
+      grpc_config.grpc_addresses.addresses[:] = workers
+
+    return config
 
   def _determine_optimal_num_threads(self):
     """Sets  number of threads to min(num_cpus, 32) or 6 if num_cpus unclear."""
@@ -501,7 +515,7 @@ class GenericLearner:
       logging.warning("Cannot determine the number of CPUs. Set num_threads=6")
       num_threads = 6
     else:
-      if num_threads >= 32:
+      if num_threads > 32:
         logging.warning(
             "The `num_threads` constructor argument is not set and the "
             "number of CPU is os.cpu_count()=%d > 32. Setting num_threads "

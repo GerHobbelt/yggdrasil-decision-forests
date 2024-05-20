@@ -1,6 +1,7 @@
 from typing import Optional, TypeVar, List, Union
 
 # pylint: disable=g-wrong-blank-lines
+from typing import Dict
 
 import numpy as np
 import numpy.typing as npt
@@ -114,6 +115,9 @@ class GenericCCModel:
       warmup_duration: float,
       batch_size: int,
   ) -> BenchmarkInferenceCCResult: ...
+  def VariableImportances(
+      self,
+  ) -> Dict[str, abstract_model_pb2.VariableImportanceSet]: ...
 
 class DecisionForestCCModel(GenericCCModel):
   def num_trees(self) -> int: ...
@@ -126,6 +130,7 @@ class DecisionForestCCModel(GenericCCModel):
       dataset1: VerticalDataset,
       dataset2: VerticalDataset,
   ) -> npt.NDArray[np.float32]: ...
+  def set_node_format(self, node_format: str) -> None: ...
 
 class RandomForestCCModel(DecisionForestCCModel):
   @property
@@ -192,4 +197,12 @@ def EvaluationPlotToHtml(evaluation: metric_pb2.EvaluationResults) -> str: ...
 # ================
 
 def SetLoggingLevel(level: int, print_file: bool) -> None: ...
+
+
+# Worker bindings
+# ================
+
+def StartWorkerBlocking(port: int) -> None: ...
+def StartWorkerNonBlocking(port: int) -> int: ...
+def StopWorkerNonBlocking(uid: int) -> None: ...
 

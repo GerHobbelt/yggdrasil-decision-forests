@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/time.h"
@@ -121,6 +122,11 @@ class GenericCCModel {
     return model_->hyperparameter_optimizer_logs();
   }
 
+  absl::flat_hash_map<std::string, model::proto::VariableImportanceSet>
+  VariableImportances() const {
+    return model_->precomputed_variable_importances();
+  }
+
  protected:
   std::unique_ptr<model::AbstractModel> model_;
   std::unique_ptr<serving::FastEngine> engine_;
@@ -136,6 +142,11 @@ class DecisionForestCCModel : public GenericCCModel {
   absl::StatusOr<py::array_t<float>> Distance(
       const dataset::VerticalDataset& dataset1,
       const dataset::VerticalDataset& dataset2);
+
+  // Sets the format for saving the model's nodes.
+  void set_node_format(const std::string& node_format) {
+    df_model_->set_node_format(node_format);
+  }
 
  protected:
   // `model` and `df_model` must correspond to the same object.
