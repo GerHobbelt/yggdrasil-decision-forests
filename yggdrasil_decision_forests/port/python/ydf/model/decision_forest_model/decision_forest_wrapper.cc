@@ -19,15 +19,50 @@
 
 #include <cstdint>
 #include <cstring>
+#include <memory>
+#include <vector>
 
+#include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
+#include "yggdrasil_decision_forests/model/decision_tree/decision_tree.pb.h"
+#include "yggdrasil_decision_forests/utils/protobuf.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
 
 namespace py = ::pybind11;
 
 namespace yggdrasil_decision_forests::port::python {
+
+namespace {
+
+using Node = model::decision_tree::proto::Node;
+using DecisionTree = model::decision_tree::DecisionTree;
+
+absl::StatusOr<std::unique_ptr<model::decision_tree::DecisionTree>> NodesToTree(
+    const std::vector<Node>& nodes) {
+  struct Reader : utils::ProtoReaderInterface<Node> {
+    Reader(const std::vector<Node>& nodes) : nodes(nodes) {}
+    virtual ~Reader() = default;
+    absl::StatusOr<bool> Next(Node* value) override {
+      if (next_idx < nodes.size()) {
+        *value = nodes[next_idx];
+        next_idx++;
+        return true;
+      }
+      return false;
+    }
+    const std::vector<Node>& nodes;
+    int next_idx = 0;
+  } reader(nodes);
+
+  auto tree = std::make_unique<DecisionTree>();
+  RETURN_IF_ERROR(tree->ReadNodes(&reader));
+  tree->SetLeafIndices();
+  return tree;
+}
+
+}  // namespace
 
 absl::StatusOr<py::array_t<int32_t>> DecisionForestCCModel::PredictLeaves(
     const dataset::VerticalDataset& dataset) {
@@ -57,6 +92,54 @@ absl::StatusOr<py::array_t<float>> DecisionForestCCModel::Distance(
   auto dst = absl::MakeSpan(distances.mutable_data(), n1 * n2);
   RETURN_IF_ERROR(df_model_->Distance(dataset1, dataset2, dst));
   return distances;
+}
+
+absl::StatusOr<std::vector<model::decision_tree::proto::Node>>
+DecisionForestCCModel::GetTree(int tree_idx) const {
+  if (tree_idx < 0 || tree_idx >= df_model_->num_trees()) {
+    return absl::InvalidArgumentError("Invalid tree index");
+  }
+
+  struct Writer : utils::ProtoWriterInterface<Node> {
+    virtual ~Writer() = default;
+    absl::Status Write(const Node& value) override {
+      nodes.push_back(value);
+      return absl::OkStatus();
+    }
+    std::vector<Node> nodes;
+  } writer;
+
+  RETURN_IF_ERROR(df_model_->decision_trees()[tree_idx]->WriteNodes(&writer));
+  return writer.nodes;
+}
+
+absl::Status DecisionForestCCModel::SetTree(
+    int tree_idx, const std::vector<model::decision_tree::proto::Node>& nodes) {
+  if (tree_idx < 0 || tree_idx >= df_model_->num_trees()) {
+    return absl::InvalidArgumentError("Invalid tree index");
+  }
+  ASSIGN_OR_RETURN(auto tree, NodesToTree(nodes));
+  (*df_model_->mutable_decision_trees())[tree_idx] = std::move(tree);
+  invalidate_engine();
+  return absl::OkStatus();
+}
+
+absl::Status DecisionForestCCModel::AddTree(
+    const std::vector<model::decision_tree::proto::Node>& nodes) {
+  ASSIGN_OR_RETURN(auto tree, NodesToTree(nodes));
+  df_model_->mutable_decision_trees()->push_back(std::move(tree));
+  invalidate_engine();
+  return absl::OkStatus();
+}
+
+absl::Status DecisionForestCCModel::RemoveTree(int tree_idx) {
+  if (tree_idx < 0 || tree_idx >= df_model_->num_trees()) {
+    return absl::InvalidArgumentError("Invalid tree index");
+  }
+  df_model_->mutable_decision_trees()->erase(
+      df_model_->mutable_decision_trees()->begin() + tree_idx);
+  invalidate_engine();
+  return absl::OkStatus();
 }
 
 }  // namespace yggdrasil_decision_forests::port::python

@@ -18,6 +18,7 @@
 
 #include <pybind11/numpy.h>
 
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <string>
@@ -38,6 +39,7 @@
 #include "yggdrasil_decision_forests/utils/benchmark/inference.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
 #include "yggdrasil_decision_forests/utils/model_analysis.pb.h"
+#include "yggdrasil_decision_forests/utils/synchronization_primitives.h"
 
 namespace py = ::pybind11;
 
@@ -81,12 +83,12 @@ class GenericCCModel {
 
   // Benchmark the inference speed of the model.
   absl::StatusOr<BenchmarkInferenceCCResult> Benchmark(
-      const dataset::VerticalDataset& dataset, const double benchmark_duration,
-      const double warmup_duration, const int batch_size);
+      const dataset::VerticalDataset& dataset, double benchmark_duration,
+      double warmup_duration, int batch_size);
 
   // Gets an engine of the model. If the engine does not exist, create it.
   // This method is not thread safe.
-  absl::StatusOr<const serving::FastEngine*> GetEngine();
+  absl::StatusOr<std::shared_ptr<const serving::FastEngine>> GetEngine();
 
   // Save the model to `directory`. Use `file_prefix` for all model files if
   // specified.
@@ -135,9 +137,16 @@ class GenericCCModel {
     return model_->precomputed_variable_importances();
   }
 
+  void invalidate_engine() { invalidate_engine_ = true; }
+
  protected:
   std::unique_ptr<model::AbstractModel> model_;
-  std::unique_ptr<serving::FastEngine> engine_;
+  utils::concurrency::Mutex engine_mutex_;
+  std::shared_ptr<const serving::FastEngine> engine_ GUARDED_BY(engine_mutex_);
+
+  // If true, the "engine_mutex_" is outdated (e.g., the model was modified) and
+  // should be re-computed.
+  std::atomic_bool invalidate_engine_{false};
 };
 
 }  // namespace yggdrasil_decision_forests::port::python

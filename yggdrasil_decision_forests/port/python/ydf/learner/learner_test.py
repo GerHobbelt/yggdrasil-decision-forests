@@ -500,6 +500,22 @@ class RandomForestLearnerTest(LearnerTest):
     predictions = model.predict(data)
     self.assertEqual(predictions.shape, (2,))
 
+  def test_learn_and_predict_when_label_is_not_last_column(self):
+    dataset_directory = os.path.join(test_utils.ydf_test_data_path(), "dataset")
+    train_path = os.path.join(dataset_directory, "adult_train.csv")
+    test_path = os.path.join(dataset_directory, "adult_test.csv")
+    label = "age"
+
+    pd_train = pd.read_csv(train_path)
+    pd_test = pd.read_csv(test_path)
+
+    learner = specialized_learners.RandomForestLearner(
+        label=label, num_trees=10
+    )
+    model_from_pd = learner.train(pd_train)
+
+    logging.info(model_from_pd.predict(pd_test))
+
   def test_model_metadata_contains_framework(self):
     learner = specialized_learners.RandomForestLearner(
         label="label", num_trees=2
@@ -727,6 +743,20 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
         learner.hyperparameters["growing_strategy"], "BEST_FIRST_GLOBAL"
     )
     _ = learner.train(ds)
+
+  def test_model_with_na_conditions_numerical(self):
+    ds = pd.DataFrame({
+        "feature": [np.nan] * 10 + [1.234] * 10,
+        "label": [0] * 10 + [1] * 10,
+    })
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label="label",
+        allow_na_conditions=True,
+        num_trees=1,
+    )
+    model = learner.train(ds)
+    evaluation = model.evaluate(ds)
+    self.assertEqual(evaluation.accuracy, 1)
 
 
 class LoggingTest(parameterized.TestCase):

@@ -24,7 +24,6 @@
 #include <limits>
 #include <memory>
 #include <random>
-#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -32,9 +31,7 @@
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/container/btree_set.h"
-#include "absl/flags/flag.h"
 #include "absl/memory/memory.h"
-#include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/time/time.h"
@@ -46,11 +43,8 @@
 #include "yggdrasil_decision_forests/dataset/vertical_dataset_io.h"
 #include "yggdrasil_decision_forests/learner/abstract_learner.pb.h"
 #include "yggdrasil_decision_forests/learner/decision_tree/decision_tree.pb.h"
-#include "yggdrasil_decision_forests/learner/decision_tree/training.h"
-#include "yggdrasil_decision_forests/learner/gradient_boosted_trees/early_stopping/early_stopping.h"
 #include "yggdrasil_decision_forests/learner/gradient_boosted_trees/gradient_boosted_trees.pb.h"
 #include "yggdrasil_decision_forests/learner/gradient_boosted_trees/loss/loss_library.h"
-#include "yggdrasil_decision_forests/learner/hyperparameters_optimizer/hyperparameters_optimizer.h"
 #include "yggdrasil_decision_forests/learner/learner_library.h"
 #include "yggdrasil_decision_forests/metric/metric.h"
 #include "yggdrasil_decision_forests/metric/report.h"
@@ -60,8 +54,6 @@
 #include "yggdrasil_decision_forests/model/decision_tree/decision_tree.pb.h"
 #include "yggdrasil_decision_forests/model/gradient_boosted_trees/gradient_boosted_trees.h"
 #include "yggdrasil_decision_forests/model/gradient_boosted_trees/gradient_boosted_trees.pb.h"
-#include "yggdrasil_decision_forests/utils/concurrency.h"
-#include "yggdrasil_decision_forests/utils/csv.h"
 #include "yggdrasil_decision_forests/utils/distribution.pb.h"
 #include "yggdrasil_decision_forests/utils/filesystem.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
@@ -79,7 +71,6 @@ namespace {
 
 using test::EqualsProto;
 using ::testing::ElementsAre;
-using ::testing::Not;
 using ::testing::SizeIs;
 using ::testing::UnorderedElementsAre;
 
@@ -380,6 +371,27 @@ TEST_F(GradientBoostedTreesOnAdult, BaseDeprecated) {
 }
 
 // Train and test a model on the adult dataset.
+TEST_F(GradientBoostedTreesOnAdult, BaseWithNAConditions) {
+  auto* gbt_config = train_config_.MutableExtension(
+      gradient_boosted_trees::proto::gradient_boosted_trees_config);
+  gbt_config->set_num_trees(100);
+  gbt_config->mutable_decision_tree()->set_max_depth(4);
+  gbt_config->mutable_decision_tree()->set_allow_na_conditions(true);
+  TrainAndEvaluateModel();
+
+  // Note: Accuracy is similar as RF (see :random_forest_test). However logloss
+  // is significantly better (which is expected as, unlike RF,  GBT is
+  // calibrated).
+  YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8662, 0.0104, 0.8664);
+  YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2975, 0.0145, 0.2944);
+
+  auto* gbt_model =
+      dynamic_cast<const GradientBoostedTreesModel*>(model_.get());
+  EXPECT_TRUE(gbt_model->CheckStructure(
+      decision_tree::CheckStructureOptions::GlobalImputation()));
+}
+
+// Train and test a model on the adult dataset.
 TEST_F(GradientBoostedTreesOnAdult, Base) {
   auto* gbt_config = train_config_.MutableExtension(
       gradient_boosted_trees::proto::gradient_boosted_trees_config);
@@ -435,6 +447,45 @@ TEST_F(GradientBoostedTreesOnAdult, MonotonicConstraints) {
   YDF_LOG(INFO) << description;
 
   QCHECK_OK(utils::model_analysis::AnalyseAndCreateHtmlReport(
+      *model_, test_dataset_, "", "",
+      file::JoinPath(test::TmpDirectory(), "analysis"), {}));
+}
+
+TEST_F(GradientBoostedTreesOnAdult, MonotonicConstraintsPure) {
+  auto* gbt_config = train_config_.MutableExtension(
+      gradient_boosted_trees::proto::gradient_boosted_trees_config);
+
+  gbt_config->set_use_hessian_gain(true);
+  train_config_.set_pure_serving_model(true);
+
+  // Ensures that the tree is monotonic.
+  gbt_config->mutable_decision_tree()
+      ->mutable_internal()
+      ->set_check_monotonic_constraints(true);
+
+  auto* constrain_1 = train_config_.mutable_monotonic_constraints()->Add();
+  constrain_1->set_feature("^age$");
+  constrain_1->set_direction(model::proto::MonotonicConstraint::INCREASING);
+
+  auto* constrain_2 = train_config_.mutable_monotonic_constraints()->Add();
+  constrain_2->set_feature("^hours_per_week$");
+  constrain_2->set_direction(model::proto::MonotonicConstraint::INCREASING);
+
+  auto* constrain_3 = train_config_.mutable_monotonic_constraints()->Add();
+  constrain_3->set_feature("^education_num$");
+  constrain_3->set_direction(model::proto::MonotonicConstraint::INCREASING);
+
+  TrainAndEvaluateModel();
+
+  YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8641, 0.009, 0.8627);
+  YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2972, 0.0181, 0.2902);
+
+  // Show the tree structure.
+  std::string description;
+  model_->AppendDescriptionAndStatistics(true, &description);
+  YDF_LOG(INFO) << description;
+
+  EXPECT_OK(utils::model_analysis::AnalyseAndCreateHtmlReport(
       *model_, test_dataset_, "", "",
       file::JoinPath(test::TmpDirectory(), "analysis"), {}));
 }
@@ -1285,6 +1336,39 @@ TEST_F(GradientBoostedTreesOnAbalone, MAELoss) {
   YDF_TEST_METRIC(metric::RMSE(evaluation_), 2.2608, 0.1464, 2.2136);
 }
 
+TEST_F(GradientBoostedTreesOnAbalone, MonotonicConstraintsPure) {
+  auto* gbt_config = train_config_.MutableExtension(
+      gradient_boosted_trees::proto::gradient_boosted_trees_config);
+  gbt_config->set_use_hessian_gain(true);
+  train_config_.set_pure_serving_model(true);
+
+  // Ensures that the tree is monotonic.
+  gbt_config->mutable_decision_tree()
+      ->mutable_internal()
+      ->set_check_monotonic_constraints(true);
+
+  auto* constrain_1 = train_config_.mutable_monotonic_constraints()->Add();
+  constrain_1->set_feature("^LongestShell$");
+  constrain_1->set_direction(model::proto::MonotonicConstraint::INCREASING);
+
+  auto* constrain_2 = train_config_.mutable_monotonic_constraints()->Add();
+  constrain_2->set_feature("^Diameter$");
+  constrain_2->set_direction(model::proto::MonotonicConstraint::INCREASING);
+
+  TrainAndEvaluateModel();
+  YDF_TEST_METRIC(metric::MAE(evaluation_), 1.5155, 0.0599, 1.51869);
+  YDF_TEST_METRIC(metric::RMSE(evaluation_), 2.2608, 0.1464, 2.14822);
+
+  // Show the tree structure.
+  std::string description;
+  model_->AppendDescriptionAndStatistics(true, &description);
+  YDF_LOG(INFO) << description;
+
+  EXPECT_OK(utils::model_analysis::AnalyseAndCreateHtmlReport(
+      *model_, test_dataset_, "", "",
+      file::JoinPath(test::TmpDirectory(), "analysis"), {}));
+}
+
 class GradientBoostedTreesOnIris : public utils::TrainAndTestTester {
   void SetUp() override {
     train_config_.set_learner(GradientBoostedTreesLearner::kRegisteredName);
@@ -1789,60 +1873,6 @@ TEST_F(GradientBoostedTreesOnAdult,
       a_posteriori_evaluation.classification().confusion();
   EXPECT_THAT(training_logs_confusion_table,
               EqualsProto(evaluation_confusion_table));
-}
-
-class AutotunedGradientBoostedTreesOnAdult : public utils::TrainAndTestTester {
-  void SetUp() override {
-    train_config_ = PARSE_TEST_PROTO(R"pb(
-      task: CLASSIFICATION
-      learner: "HYPERPARAMETER_OPTIMIZER"
-      label: "income"
-
-      [yggdrasil_decision_forests.model.hyperparameters_optimizer_v2.proto
-           .hyperparameters_optimizer_config] {
-
-        retrain_final_model: true
-
-        optimizer {
-          optimizer_key: "RANDOM"
-          [yggdrasil_decision_forests.model.hyperparameters_optimizer_v2.proto
-               .random] { num_trials: 25 }
-        }
-
-        base_learner {
-          learner: "GRADIENT_BOOSTED_TREES"
-          [yggdrasil_decision_forests.model.gradient_boosted_trees.proto
-               .gradient_boosted_trees_config] { num_trees: 50 }
-        }
-
-        base_learner_deployment {
-          # The multi-threading is done at the optimizer level.
-          num_threads: 1
-        }
-
-        predefined_search_space {}
-      }
-    )pb");
-
-    train_config_.set_learner(
-        hyperparameters_optimizer_v2::HyperParameterOptimizerLearner::
-            kRegisteredName);
-    train_config_.set_task(model::proto::Task::CLASSIFICATION);
-    train_config_.set_label("income");
-    train_config_.add_features(".*");
-    dataset_filename_ = "adult.csv";
-
-    deployment_config_.set_cache_path(
-        file::JoinPath(test::TmpDirectory(), "working_directory"));
-  }
-};
-
-TEST_F(AutotunedGradientBoostedTreesOnAdult,
-       RandomTuner_MemoryDataset_LocalTraining) {
-  TrainAndEvaluateModel();
-  EXPECT_GE(metric::Accuracy(evaluation_), 0.87);
-  EXPECT_LT(metric::LogLoss(evaluation_), 0.30);
-  EXPECT_EQ(model_->hyperparameter_optimizer_logs()->steps_size(), 25);
 }
 
 // TODO - b/311636358 Refactor the GBT tests to be more cohesive and

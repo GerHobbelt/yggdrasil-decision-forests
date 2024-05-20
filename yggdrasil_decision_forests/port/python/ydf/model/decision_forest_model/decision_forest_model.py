@@ -14,13 +14,15 @@
 
 """Definitions for generic decision forest models."""
 
-from typing import Optional
+import sys
+from typing import Iterator, Optional, Sequence
 
 import numpy as np
 
 from ydf.cc import ydf
 from ydf.dataset import dataset
 from ydf.model import generic_model
+from ydf.model.tree import tree as tree_lib
 
 
 class DecisionForestModel(generic_model.GenericModel):
@@ -31,6 +33,82 @@ class DecisionForestModel(generic_model.GenericModel):
   def num_trees(self):
     """Returns the number of trees in the decision forest."""
     return self._model.num_trees()
+
+  def get_tree(self, tree_idx: int) -> tree_lib.Tree:
+    """Gets a single tree of the model.
+
+    Args:
+      tree_idx: Index of the tree. Should be in [0, num_trees()).
+
+    Returns:
+      The tree.
+    """
+    nodes = self._model.GetTree(tree_idx)
+    return tree_lib.proto_nodes_to_tree(nodes, self.data_spec())
+
+  def get_all_trees(self) -> Sequence[tree_lib.Tree]:
+    """Returns all the trees in the model."""
+
+    return list(self.iter_trees())
+
+  def iter_trees(self) -> Iterator[tree_lib.Tree]:
+    """Returns an iterator over all the trees in the model."""
+
+    return (self.get_tree(tree_idx) for tree_idx in range(self.num_trees()))
+
+  def print_tree(self, tree_idx: int = 0, file=sys.stdout) -> None:
+    """Prints a tree in the terminal.
+
+    Usage example:
+
+    ```python
+    # Create a dataset
+    train_ds = pd.DataFrame({
+        "c1": [1.0, 1.1, 2.0, 3.5, 4.2] + list(range(10)),
+        "label": ["a", "b", "b", "a", "a"] * 3,
+    })
+    # Train a CART model
+    learner = ydf.CartLearner(label="label").train(train_ds)
+    # Make sure the model is a CART
+    assert isinstance(model, ydf.CARTModel)
+    # Print the tree
+    model.print_tree()
+    ```
+
+    Args:
+      tree_idx: Index of the tree. Should be in [0, self.num_trees()).
+      file: Where to print the tree. By default, prints on the terminal
+        stanrdard output.
+    """
+
+    file.write(self.get_tree(tree_idx).pretty(self.data_spec()))
+
+  def set_tree(self, tree_idx: int, tree: tree_lib.Tree) -> None:
+    """Overrides a single tree of the model.
+
+    Args:
+      tree_idx: Index of the tree. Should be in [0, num_trees()).
+      tree: New tree.
+    """
+    proto_nodes = tree_lib.tree_to_proto_nodes(tree, self.data_spec())
+    self._model.SetTree(tree_idx, proto_nodes)
+
+  def add_tree(self, tree: tree_lib.Tree) -> None:
+    """Adds a single tree of the model.
+
+    Args:
+      tree: New tree.
+    """
+    proto_nodes = tree_lib.tree_to_proto_nodes(tree, self.data_spec())
+    self._model.AddTree(proto_nodes)
+
+  def remove_tree(self, tree_idx: int) -> None:
+    """Removes a single tree of the model.
+
+    Args:
+      tree_idx: Index of the tree. Should be in [0, num_trees()).
+    """
+    self._model.RemoveTree(tree_idx)
 
   def predict_leaves(self, data: dataset.InputDataset) -> np.ndarray:
     """Gets the index of the active leaf in each tree.

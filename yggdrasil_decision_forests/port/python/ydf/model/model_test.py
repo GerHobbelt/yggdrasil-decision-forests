@@ -14,16 +14,19 @@
 
 """Tests for the YDF models."""
 
+import concurrent.futures
 import logging
 import os
 import tempfile
 import textwrap
+import time
 
 from absl.testing import absltest
 from absl.testing import parameterized
 import numpy.testing as npt
 import pandas as pd
 
+from ydf.dataset import dataset
 from ydf.model import generic_model
 from ydf.model import model_lib
 from ydf.model import model_metadata
@@ -82,6 +85,53 @@ class GenericModelTest(parameterized.TestCase):
     expected_predictions = predictions_df[">50K"].to_numpy()
     npt.assert_almost_equal(predictions, expected_predictions, decimal=5)
 
+  def test_predict_without_label_column(self):
+    model_path = os.path.join(
+        test_utils.ydf_test_data_path(), "model", "adult_binary_class_rf"
+    )
+    dataset_path = os.path.join(
+        test_utils.ydf_test_data_path(), "dataset", "adult_test.csv"
+    )
+    predictions_path = os.path.join(
+        test_utils.ydf_test_data_path(),
+        "prediction",
+        "adult_test_binary_class_rf.csv",
+    )
+    model = model_lib.load_model(model_path)
+
+    test_df = pd.read_csv(dataset_path).drop(columns=["income"])
+    predictions = model.predict(test_df)
+    predictions_df = pd.read_csv(predictions_path)
+
+    expected_predictions = predictions_df[">50K"].to_numpy()
+    npt.assert_almost_equal(predictions, expected_predictions, decimal=5)
+
+  def test_predict_fails_with_missing_feature_columns(self):
+    model_path = os.path.join(
+        test_utils.ydf_test_data_path(), "model", "adult_binary_class_rf"
+    )
+    dataset_path = os.path.join(
+        test_utils.ydf_test_data_path(), "dataset", "adult_test.csv"
+    )
+    model = model_lib.load_model(model_path)
+
+    test_df = pd.read_csv(dataset_path).drop(columns=["age"])
+    with self.assertRaises(ValueError):
+      _ = model.predict(test_df)
+
+  def test_evaluate_fails_with_missing_label_columns(self):
+    model_path = os.path.join(
+        test_utils.ydf_test_data_path(), "model", "adult_binary_class_rf"
+    )
+    dataset_path = os.path.join(
+        test_utils.ydf_test_data_path(), "dataset", "adult_test.csv"
+    )
+    model = model_lib.load_model(model_path)
+
+    test_df = pd.read_csv(dataset_path).drop(columns=["income"])
+    with self.assertRaises(ValueError):
+      _ = model.evaluate(test_df)
+
   def test_evaluate_adult_gbt(self):
     model_path = os.path.join(
         test_utils.ydf_test_data_path(), "model", "adult_binary_class_gbdt"
@@ -103,9 +153,9 @@ class GenericModelTest(parameterized.TestCase):
             +-------+-------+-------+
             |       | <=50K |  >50K |
             +-------+-------+-------+
-            | <=50K |  6987 |   822 |
+            | <=50K |  6987 |   425 |
             +-------+-------+-------+
-            |  >50K |   425 |  1535 |
+            |  >50K |   822 |  1535 |
             +-------+-------+-------+
         characteristics:
             name: '>50K' vs others
@@ -374,6 +424,25 @@ Use `model.describe()` for more details
     )
     evaluation = model.evaluate(test_ds_path)
     self.assertAlmostEqual(evaluation.accuracy, 0.80011, places=5)
+
+  def test_multi_thread_predict(self):
+    model_path = os.path.join(
+        test_utils.ydf_test_data_path(), "model", "adult_binary_class_gbdt"
+    )
+    dataset_path = os.path.join(
+        test_utils.ydf_test_data_path(), "dataset", "adult_test.csv"
+    )
+    model = model_lib.load_model(model_path)
+    test_df = pd.read_csv(dataset_path)
+    test_ds = dataset.create_vertical_dataset(
+        test_df, data_spec=model.data_spec()
+    )
+    for num_workers in range(1, 10 + 1):
+      with concurrent.futures.ThreadPoolExecutor(num_workers) as executor:
+        begin = time.time()
+        _ = list(executor.map(model.predict, [test_ds] * 10))
+        end = time.time()
+        logging.info("Runtime for %s workers: %s", num_workers, end - begin)
 
 
 if __name__ == "__main__":

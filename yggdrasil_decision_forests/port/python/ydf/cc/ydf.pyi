@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, TypeVar, Union
+from typing import Dict, List, Optional, Sequence, TypeVar, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -8,6 +8,8 @@ from google3.third_party.yggdrasil_decision_forests.learner import abstract_lear
 from google3.third_party.yggdrasil_decision_forests.metric import metric_pb2
 from google3.third_party.yggdrasil_decision_forests.model import abstract_model_pb2
 from google3.third_party.yggdrasil_decision_forests.model import hyperparameter_pb2
+from google3.third_party.yggdrasil_decision_forests.model.decision_tree import decision_tree_pb2
+from google3.third_party.yggdrasil_decision_forests.utils import fold_generator_pb2
 from google3.third_party.yggdrasil_decision_forests.utils import fold_generator_pb2
 from google3.third_party.yggdrasil_decision_forests.utils import model_analysis_pb2
 
@@ -24,7 +26,7 @@ class VerticalDataset:
   def CreateColumnsFromDataSpec(
       self, data_spec: data_spec_pb2.DataSpecification
   ) -> None: ...
-  def SetAndCheckNumRows(self, set_data_spec: bool) -> None: ...
+  def SetAndCheckNumRowsAndFillMissing(self, set_data_spec: bool) -> None: ...
   def PopulateColumnCategoricalNPBytes(
       self,
       name: str,
@@ -63,10 +65,16 @@ class VerticalDataset:
       column_idx: Optional[int] = None,
   ) -> None: ...
   def CreateFromPathWithDataSpec(
-      self, path: str, data_spec: data_spec_pb2.DataSpecification
+      self,
+      path: str,
+      data_spec: data_spec_pb2.DataSpecification,
+      required_columns: Optional[Sequence[str]] = None,
   ) -> None: ...
   def CreateFromPathWithDataSpecGuide(
-      self, path: str, data_spec_guide: data_spec_pb2.DataSpecificationGuide
+      self,
+      path: str,
+      data_spec_guide: data_spec_pb2.DataSpecificationGuide,
+      required_columns: Optional[Sequence[str]] = None,
   ) -> None: ...
 
 
@@ -148,6 +156,23 @@ class DecisionForestCCModel(GenericCCModel):
       dataset2: VerticalDataset,
   ) -> npt.NDArray[np.float32]: ...
   def set_node_format(self, node_format: str) -> None: ...
+  def GetTree(
+      self,
+      tree_idx: int,
+  ) -> List[decision_tree_pb2.Node]: ...
+  def SetTree(
+      self,
+      tree_idx: int,
+      nodes: Sequence[decision_tree_pb2.Node],
+  ) -> None: ...
+  def AddTree(
+      self,
+      nodes: Sequence[decision_tree_pb2.Node],
+  ) -> None: ...
+  def RemoveTree(
+      self,
+      tree_idx: int,
+  ) -> None: ...
 
 class RandomForestCCModel(DecisionForestCCModel):
   @property

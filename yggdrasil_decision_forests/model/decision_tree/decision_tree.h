@@ -94,10 +94,23 @@ struct CheckStructureOptions {
   // For all the other conditions.
   bool global_imputation_others = true;
 
+  // Check if the model does not contain any IsNA condition. Should not be
+  // combined with other options.
+  bool check_no_na_conditions = false;
+
   static CheckStructureOptions GlobalImputation() {
     return {
         /*.global_imputation_is_higher =*/true,
         /*.global_imputation_others =*/true,
+        /*.check_no_na_conditions =*/false,
+    };
+  }
+
+  static CheckStructureOptions NACondition() {
+    return {
+        /*.global_imputation_is_higher =*/false,
+        /*.global_imputation_others =*/false,
+        /*.check_no_na_conditions =*/true,
     };
   }
 };
@@ -397,6 +410,11 @@ absl::Status Distance(
     const dataset::VerticalDataset& dataset2, absl::Span<float> distances,
     const absl::optional<std::reference_wrapper<std::vector<float>>>&
         tree_weights = {});
+
+// Lists the input features used by the trees. The input features are given as
+// sorted column indices.
+std::vector<int> input_features(
+    absl::Span<const std::unique_ptr<decision_tree::DecisionTree>> trees);
 
 }  // namespace decision_tree
 }  // namespace model

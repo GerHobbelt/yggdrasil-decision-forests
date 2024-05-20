@@ -32,6 +32,7 @@
 #include "yggdrasil_decision_forests/dataset/example.pb.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset_io.h"
+#include "yggdrasil_decision_forests/model/decision_tree/builder.h"
 #include "yggdrasil_decision_forests/model/decision_tree/decision_tree.pb.h"
 #include "yggdrasil_decision_forests/utils/filesystem.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
@@ -658,6 +659,115 @@ TEST(DecisionTree, WeightedDistance) {
       Distance(trees, dataset1, dataset2, absl::MakeSpan(distances), weights));
 
   EXPECT_THAT(distances, ElementsAre(0.2f, 0.f, 0.8f, 1.f));
+}
+
+TEST(DecisionTree, CheckStructureNACondition) {
+  // Builds a decision tree with a single higherThan condition and two leaf
+  // nodes.
+  //
+  // attribute >= threshold
+  //     ├─(neg)─ leaf #0
+  //     └─(pos)─ leaf #1
+  const auto make_tree_without_na =
+      []() -> absl::StatusOr<std::unique_ptr<DecisionTree>> {
+    auto tree = std::make_unique<DecisionTree>();
+    tree->CreateRoot();
+    NodeWithChildren* root = tree->mutable_root();
+    STATUS_CHECK(root);
+    tree->mutable_root()->CreateChildren();
+    tree->mutable_root()->mutable_node()->mutable_condition()->set_attribute(0);
+    tree->mutable_root()
+        ->mutable_node()
+        ->mutable_condition()
+        ->mutable_condition()
+        ->mutable_higher_condition()
+        ->set_threshold(0.5);
+    tree->SetLeafIndices();
+    return tree;
+  };
+  // Builds a decision tree with a two conditions
+  //
+  // attribute>=0.5
+  //     ├─(pos)─ attribute is NA
+  //     |        ├─(pos)
+  //     |        └─(neg)
+  //     └─(neg)
+  const auto make_tree_with_na =
+      []() -> absl::StatusOr<std::unique_ptr<DecisionTree>> {
+    auto tree = std::make_unique<DecisionTree>();
+    tree->CreateRoot();
+    NodeWithChildren* root = tree->mutable_root();
+    STATUS_CHECK(root);
+    tree->mutable_root()->CreateChildren();
+    tree->mutable_root()->mutable_node()->mutable_condition()->set_attribute(0);
+    tree->mutable_root()
+        ->mutable_node()
+        ->mutable_condition()
+        ->mutable_condition()
+        ->mutable_higher_condition()
+        ->set_threshold(0.5);
+    tree->mutable_root()->mutable_pos_child()->CreateChildren();
+    tree->mutable_root()
+        ->mutable_pos_child()
+        ->mutable_node()
+        ->mutable_condition()
+        ->set_attribute(0);
+    tree->mutable_root()
+        ->mutable_pos_child()
+        ->mutable_node()
+        ->mutable_condition()
+        ->mutable_condition()
+        ->mutable_na_condition();
+
+    tree->SetLeafIndices();
+    return tree;
+  };
+
+  // Build a forest with one trees.
+  std::vector<std::unique_ptr<DecisionTree>> trees;
+  {
+    ASSERT_OK_AND_ASSIGN(std::unique_ptr<DecisionTree> tree,
+                         make_tree_without_na());
+    trees.push_back(std::move(tree));
+  }
+
+  DataSpecification dataspec;
+  dataset::AddColumn("a", ColumnType::NUMERICAL, &dataspec);
+
+  EXPECT_TRUE(
+      CheckStructure(CheckStructureOptions::NACondition(), dataspec, trees));
+
+  {
+    ASSERT_OK_AND_ASSIGN(std::unique_ptr<DecisionTree> tree,
+                         make_tree_with_na());
+    trees.push_back(std::move(tree));
+  }
+
+  EXPECT_FALSE(
+      CheckStructure(CheckStructureOptions::NACondition(), dataspec, trees));
+}
+
+TEST(DecisionTree, InputFeatures) {
+  auto tree = std::make_unique<DecisionTree>();
+  TreeBuilder builder(tree.get());
+
+  dataset::proto::DataSpecification dataspec;
+  dataset::AddColumn("l", dataset::proto::ColumnType::NUMERICAL, &dataspec);
+  dataset::AddColumn("f1", dataset::proto::ColumnType::NUMERICAL, &dataspec);
+  dataset::AddColumn("f2", dataset::proto::ColumnType::NUMERICAL, &dataspec);
+  dataset::AddColumn("f3", dataset::proto::ColumnType::NUMERICAL, &dataspec);
+  dataset::AddColumn("f4", dataset::proto::ColumnType::NUMERICAL, &dataspec);
+
+  auto [pos, l1] = builder.ConditionIsGreater(1, 1);
+  auto [l2, l3] = pos.ConditionOblique({2, 3}, {0.5f, 0.5f}, 1);
+  l1.LeafRegression(1);
+  l2.LeafRegression(2);
+  l3.LeafRegression(3);
+
+  std::vector<std::unique_ptr<decision_tree::DecisionTree>> trees;
+  trees.push_back(std::move(tree));
+
+  EXPECT_THAT(input_features(trees), ElementsAre(1, 2, 3));
 }
 
 }  // namespace

@@ -15,34 +15,105 @@
 """Tests for the Gradient Boosted trees models."""
 
 import os
+from typing import Tuple
 
 from absl import logging
 from absl.testing import absltest
 import numpy as np
+import numpy.testing as npt
 import pandas as pd
 
+from ydf.dataset import dataspec
+from ydf.learner import specialized_learners
+from ydf.model import generic_model
 from ydf.model import model_lib
+from ydf.model.gradient_boosted_trees_model import gradient_boosted_trees_model
+from ydf.model.tree import condition as condition_lib
+from ydf.model.tree import node as node_lib
+from ydf.model.tree import tree as tree_lib
+from ydf.model.tree import value as value_lib
 from ydf.utils import test_utils
+
+RegressionValue = value_lib.RegressionValue
+Leaf = node_lib.Leaf
+NonLeaf = node_lib.NonLeaf
+NumericalHigherThanCondition = condition_lib.NumericalHigherThanCondition
+Tree = tree_lib.Tree
 
 
 class GradientBoostedTreesTest(absltest.TestCase):
 
-  def test_validation_loss(self):
+  def setUp(self):
+    super().setUp()
     model_path = os.path.join(
         test_utils.ydf_test_data_path(), "model", "adult_binary_class_gbdt"
     )
-    model = model_lib.load_model(model_path)
+    self.adult_binary_class_gbdt = model_lib.load_model(model_path)
 
-    validation_loss = model.validation_loss()
+  def test_input_feature_names(self):
+    self.assertEqual(
+        self.adult_binary_class_gbdt.input_feature_names(),
+        [
+            "age",
+            "workclass",
+            "fnlwgt",
+            "education",
+            "education_num",
+            "marital_status",
+            "occupation",
+            "relationship",
+            "race",
+            "sex",
+            "capital_gain",
+            "capital_loss",
+            "hours_per_week",
+            "native_country",
+        ],
+    )
+
+  def test_input_features(self):
+    InputFeature = generic_model.InputFeature
+    NUMERICAL = dataspec.Semantic.NUMERICAL
+    CATEGORICAL = dataspec.Semantic.CATEGORICAL
+    self.assertEqual(
+        self.adult_binary_class_gbdt.input_features(),
+        [
+            InputFeature("age", NUMERICAL, 0),
+            InputFeature("workclass", CATEGORICAL, 1),
+            InputFeature("fnlwgt", NUMERICAL, 2),
+            InputFeature("education", CATEGORICAL, 3),
+            InputFeature("education_num", CATEGORICAL, 4),
+            InputFeature("marital_status", CATEGORICAL, 5),
+            InputFeature("occupation", CATEGORICAL, 6),
+            InputFeature("relationship", CATEGORICAL, 7),
+            InputFeature("race", CATEGORICAL, 8),
+            InputFeature("sex", CATEGORICAL, 9),
+            InputFeature("capital_gain", NUMERICAL, 10),
+            InputFeature("capital_loss", NUMERICAL, 11),
+            InputFeature("hours_per_week", NUMERICAL, 12),
+            InputFeature("native_country", CATEGORICAL, 13),
+        ],
+    )
+
+  def test_task(self):
+    self.assertEqual(
+        self.adult_binary_class_gbdt.task(), generic_model.Task.CLASSIFICATION
+    )
+
+  def test_label_classes(self):
+    self.assertEqual(
+        self.adult_binary_class_gbdt.label_classes(), ["<=50K", ">50K"]
+    )
+
+  def test_label(self):
+    self.assertEqual(self.adult_binary_class_gbdt.label(), "income")
+
+  def test_validation_loss(self):
+    validation_loss = self.adult_binary_class_gbdt.validation_loss()
     self.assertAlmostEqual(validation_loss, 0.573842942, places=6)
 
   def test_initial_predictions(self):
-    model_path = os.path.join(
-        test_utils.ydf_test_data_path(), "model", "adult_binary_class_gbdt"
-    )
-    model = model_lib.load_model(model_path)
-
-    initial_predictions = model.initial_predictions()
+    initial_predictions = self.adult_binary_class_gbdt.initial_predictions()
     np.testing.assert_allclose(initial_predictions, [-1.1630996])
 
   def test_variable_importances(self):
@@ -83,13 +154,6 @@ class GradientBoostedTreesTest(absltest.TestCase):
     )
 
   def test_predict_distance(self):
-    model_path = os.path.join(
-        test_utils.ydf_test_data_path(),
-        "model",
-        "adult_binary_class_gbdt",
-    )
-    model = model_lib.load_model(model_path)
-
     dataset = pd.read_csv(
         os.path.join(
             test_utils.ydf_test_data_path(), "dataset", "adult_test.csv"
@@ -97,7 +161,7 @@ class GradientBoostedTreesTest(absltest.TestCase):
         nrows=500,
     )
 
-    distances = model.distance(dataset)
+    distances = self.adult_binary_class_gbdt.distance(dataset)
     logging.info("distances:\n%s", distances)
     self.assertEqual(distances.shape, (dataset.shape[0], dataset.shape[0]))
 
@@ -114,6 +178,288 @@ class GradientBoostedTreesTest(absltest.TestCase):
         dataset.iloc[most_similar_example_idx]["income"],
         dataset.iloc[0]["income"],
     )
+
+  def test_model_inspector_get_valid_tree(self):
+    self.assertEqual(self.adult_binary_class_gbdt.num_trees(), 68)
+    self.assertLen(
+        self.adult_binary_class_gbdt.get_all_trees(),
+        self.adult_binary_class_gbdt.num_trees(),
+    )
+
+    tree = self.adult_binary_class_gbdt.get_tree(1)
+    self.assertFalse(tree.root.is_leaf)
+    # Validated with: external/ydf_cc/yggdrasil_decision_forests/cli:show_model
+    self.assertEqual(
+        tree.root.condition,
+        condition_lib.CategoricalIsInCondition(
+            missing=False,
+            score=3275.003662109375,
+            attribute=5,
+            mask=[2, 3, 4, 5, 6, 7],
+        ),
+    )
+    self.assertEqual(
+        tree.root.value,
+        value_lib.RegressionValue(
+            value=-0.0006140652694739401, num_examples=0.0
+        ),
+    )
+
+  def test_model_inspector_get_wrong_tree(self):
+    with self.assertRaisesRegex(ValueError, "Invalid tree index"):
+      _ = self.adult_binary_class_gbdt.get_tree(-1)
+    with self.assertRaisesRegex(ValueError, "Invalid tree index"):
+      _ = self.adult_binary_class_gbdt.get_tree(
+          self.adult_binary_class_gbdt.num_trees()
+      )
+
+  def test_model_inspector_print_tree(self):
+    tree = self.adult_binary_class_gbdt.get_tree(1)
+    test_utils.golden_check_string(
+        self,
+        tree.pretty(self.adult_binary_class_gbdt.data_spec()),
+        os.path.join(test_utils.pydf_test_data_path(), "adult_gbt_tree_0.txt"),
+    )
+
+
+class EditModelTest(absltest.TestCase):
+
+  def create_model_and_dataset(
+      self,
+  ) -> Tuple[
+      gradient_boosted_trees_model.GradientBoostedTreesModel, pd.DataFrame
+  ]:
+    dataset = {
+        "x1": np.array([0, 0, 0, 1, 1, 1]),
+        "x2": np.array([1, 1, 0, 0, 1, 1]),
+        "y": np.array([0, 0, 0, 0, 1, 1]),
+    }
+    model = specialized_learners.GradientBoostedTreesLearner(
+        label="y",
+        num_trees=1,
+        max_depth=4,
+        apply_link_function=False,
+        min_examples=1,
+    ).train(dataset)
+    assert isinstance(
+        model, gradient_boosted_trees_model.GradientBoostedTreesModel
+    )
+    return model, dataset
+
+  def test_create_model_and_dataset(self):
+    model, dataset = self.create_model_and_dataset()
+    tree = model.get_tree(0)
+    self.assertEqual(model.num_trees(), 1)
+    self.assertEqual(
+        tree.pretty(model.data_spec()),
+        """\
+'x1' >= 0.5 [score=0.11111 missing=True]
+    ├─(pos)─ 'x2' >= 0.5 [score=0.22222 missing=True]
+    │        ├─(pos)─ value=0.3
+    │        └─(neg)─ value=-0.15 sd=4.069e-05
+    └─(neg)─ value=-0.15 sd=4.069e-05
+""",
+    )
+    bias = -0.693147
+    npt.assert_almost_equal(model.initial_predictions(), [bias], decimal=4)
+    npt.assert_almost_equal(
+        model.predict(dataset),
+        [
+            bias - 0.15,
+            bias - 0.15,
+            bias - 0.15,
+            bias - 0.15,
+            bias + 0.3,
+            bias + 0.3,
+        ],
+        decimal=4,
+    )
+
+  def test_set_tree(self):
+    model, dataset = self.create_model_and_dataset()
+    tree = model.get_tree(0)
+    assert isinstance(tree.root, node_lib.NonLeaf)
+    assert isinstance(tree.root.pos_child.pos_child, node_lib.Leaf)
+    assert isinstance(
+        tree.root.pos_child.pos_child.value, value_lib.RegressionValue
+    )
+    tree.root.pos_child.pos_child.value.value = 0.1
+
+    expected_tree_repr = """\
+'x1' >= 0.5 [score=0.11111 missing=True]
+    ├─(pos)─ 'x2' >= 0.5 [score=0.22222 missing=True]
+    │        ├─(pos)─ value=0.1
+    │        └─(neg)─ value=-0.15 sd=4.069e-05
+    └─(neg)─ value=-0.15 sd=4.069e-05
+"""
+
+    self.assertEqual(tree.pretty(model.data_spec()), expected_tree_repr)
+    model.set_tree(0, tree)
+    self.assertEqual(model.num_trees(), 1)
+    self.assertEqual(
+        model.get_tree(0).pretty(model.data_spec()), expected_tree_repr
+    )
+    bias = -0.693147
+    npt.assert_almost_equal(
+        model.predict(dataset),
+        [
+            bias - 0.15,
+            bias - 0.15,
+            bias - 0.15,
+            bias - 0.15,
+            bias + 0.1,
+            bias + 0.1,
+        ],
+        decimal=4,
+    )
+
+  def test_add_tree(self):
+    model, dataset = self.create_model_and_dataset()
+
+    tree = Tree(
+        root=NonLeaf(
+            condition=NumericalHigherThanCondition(
+                missing=False, score=3.0, attribute=1, threshold=0.6
+            ),
+            pos_child=Leaf(value=RegressionValue(num_examples=1.0, value=2.0)),
+            neg_child=Leaf(value=RegressionValue(num_examples=1.0, value=-2.0)),
+        )
+    )
+    expected_tree_repr = """\
+'x1' >= 0.6 [score=3 missing=False]
+    ├─(pos)─ value=2
+    └─(neg)─ value=-2
+"""
+
+    self.assertEqual(tree.pretty(model.data_spec()), expected_tree_repr)
+    model.add_tree(tree)
+    self.assertEqual(model.num_trees(), 2)
+    self.assertEqual(
+        model.get_tree(1).pretty(model.data_spec()), expected_tree_repr
+    )
+    bias = -0.693147
+    npt.assert_almost_equal(
+        model.predict(dataset),
+        [
+            bias - 0.15 - 2.0,
+            bias - 0.15 - 2.0,
+            bias - 0.15 - 2.0,
+            bias - 0.15 + 2.0,
+            bias + 0.3 + 2.0,
+            bias + 0.3 + 2.0,
+        ],
+        decimal=4,
+    )
+
+  def test_remove_tree(self):
+    model, dataset = self.create_model_and_dataset()
+    model.remove_tree(0)
+    self.assertEqual(model.num_trees(), 0)
+    bias = -0.693147
+    npt.assert_almost_equal(
+        model.predict(dataset),
+        [bias] * 6,
+        decimal=4,
+    )
+
+  def test_invalid_inference(self):
+    dataset = {
+        "x1": np.array([0, 0, 2, 2, 1, 1]),
+        "y": np.array([0, 0, 1, 1, 2, 2]),
+    }
+    model = specialized_learners.GradientBoostedTreesLearner(
+        label="y",
+        num_trees=1,
+        max_depth=4,
+        apply_link_function=False,
+        min_examples=1,
+    ).train(dataset)
+    assert isinstance(
+        model, gradient_boosted_trees_model.GradientBoostedTreesModel
+    )
+    self.assertEqual(model.num_trees(), 3)
+    self.assertEqual(
+        model.get_tree(0).pretty(model.data_spec()),
+        """\
+'x1' >= 0.5 [score=0.22222 missing=True]
+    ├─(pos)─ value=-0.15 sd=4.069e-05
+    └─(neg)─ value=0.3
+""",
+    )
+    self.assertEqual(
+        model.get_tree(1).pretty(model.data_spec()),
+        """\
+'x1' >= 1.5 [score=0.22222 missing=False]
+    ├─(pos)─ value=0.3
+    └─(neg)─ value=-0.15 sd=4.069e-05
+""",
+    )
+    self.assertEqual(
+        model.get_tree(2).pretty(model.data_spec()),
+        """\
+'x1' >= 0.5 [score=0.055556 missing=True]
+    ├─(pos)─ 'x1' >= 1.5 [score=0.25 missing=False]
+    │        ├─(pos)─ value=-0.15 sd=4.069e-05
+    │        └─(neg)─ value=0.3
+    └─(neg)─ value=-0.15 sd=4.069e-05
+""",
+    )
+
+    tree = Tree(
+        root=NonLeaf(
+            condition=NumericalHigherThanCondition(
+                missing=False, score=3.0, attribute=1, threshold=0.6
+            ),
+            pos_child=Leaf(value=RegressionValue(num_examples=1.0, value=2.0)),
+            neg_child=Leaf(value=RegressionValue(num_examples=1.0, value=-2.0)),
+        )
+    )
+    expected_tree_repr = """\
+'x1' >= 0.6 [score=3 missing=False]
+    ├─(pos)─ value=2
+    └─(neg)─ value=-2
+"""
+    self.assertEqual(tree.pretty(model.data_spec()), expected_tree_repr)
+    model.add_tree(tree)
+    self.assertEqual(model.num_trees(), 4)
+
+    with self.assertRaisesRegex(
+        ValueError, "Invalid number of trees in the gradient boosted tree"
+    ):
+      _ = model.predict(dataset)
+
+  def test_add_tree_to_empty_forest(self):
+    dataset = {
+        "x1": np.array([0, 1]),
+        "x2": np.array([0, 1]),
+        "x3": np.array([0, 1]),
+        "y": np.array([0, 1]),
+    }
+    model = specialized_learners.GradientBoostedTreesLearner(
+        label="y", num_trees=0
+    ).train(dataset)
+    assert isinstance(
+        model, gradient_boosted_trees_model.GradientBoostedTreesModel
+    )
+    self.assertEqual(model.num_trees(), 0)
+    self.assertSequenceEqual(model.input_feature_names(), ["x1", "x2", "x3"])
+
+    tree = Tree(
+        root=NonLeaf(
+            condition=NumericalHigherThanCondition(
+                missing=False, score=3.0, attribute=2, threshold=0.6
+            ),
+            pos_child=Leaf(value=RegressionValue(num_examples=1.0, value=2.0)),
+            neg_child=Leaf(value=RegressionValue(num_examples=1.0, value=-2.0)),
+        )
+    )
+    model.add_tree(tree)
+    self.assertEqual(model.num_trees(), 1)
+    self.assertSequenceEqual(model.input_feature_names(), ["x1", "x2", "x3"])
+
+    model.remove_tree(0)
+    self.assertEqual(model.num_trees(), 0)
+    self.assertSequenceEqual(model.input_feature_names(), ["x1", "x2", "x3"])
 
 
 if __name__ == "__main__":

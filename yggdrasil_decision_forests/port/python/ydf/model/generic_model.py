@@ -18,7 +18,7 @@ import dataclasses
 import enum
 import os
 import tempfile
-from typing import Any, Dict, List, Literal, Optional, Tuple, TypeVar, Union
+from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, TypeVar, Union
 
 from absl import logging
 import numpy as np
@@ -124,6 +124,22 @@ class NodeFormat(enum.Enum):
   """
 
   BLOB_SEQUENCE = enum.auto()
+
+
+@dataclasses.dataclass
+class InputFeature:
+  """An input feature of a model.
+
+  Attributes:
+    name: Feature name. Unique for a model.
+    semantic: Semantic of the feature.
+    column_idx: Index of the column corresponding to the feature in the
+      dataspec.
+  """
+
+  name: str
+  semantic: dataspec.Semantic
+  column_idx: int
 
 
 class GenericModel:
@@ -245,7 +261,9 @@ Use `model.describe()` for more details
 
     with log.cc_log_context():
       vds = dataset.create_vertical_dataset(
-          ds, data_spec=self._model.data_spec()
+          ds,
+          data_spec=self._model.data_spec(),
+          required_columns=self.input_feature_names(),
       )
       result = self._model.Benchmark(
           vds._dataset, benchmark_duration, warmup_duration, batch_size
@@ -307,8 +325,12 @@ Use `model.describe()` for more details
 
   def predict(self, data: dataset.InputDataset) -> np.ndarray:
     with log.cc_log_context():
+      # The data spec contains the label / weights /  ranking group / uplift
+      # treatment column, but those are not required for making predictions.
       ds = dataset.create_vertical_dataset(
-          data, data_spec=self._model.data_spec()
+          data,
+          data_spec=self._model.data_spec(),
+          required_columns=self.input_feature_names(),
       )
       result = self._model.Predict(ds._dataset)  # pylint: disable=protected-access
     return result
@@ -684,6 +706,10 @@ Use `model.describe()` for more details
   def label_col_idx(self) -> int:
     return self._model.label_col_idx()
 
+  def label(self) -> str:
+    """Name of the label column."""
+    return self.data_spec().columns[self.label_col_idx()].name
+
   def label_classes(self) -> List[str]:
     """Returns the label classes for classification tasks, None otherwise."""
     if self.task() != Task.CLASSIFICATION:
@@ -707,6 +733,32 @@ Use `model.describe()` for more details
 
     # The first element is the "out-of-vocabulary" that is not used in labels.
     return dataspec.categorical_column_dictionary_to_list(label_column)[1:]
+
+  def input_feature_names(self) -> List[str]:
+    """Returns the names of the input features.
+
+    The features are sorted in increasing order of column_idx.
+    """
+
+    dataspec_columns = self.data_spec().columns
+    return [dataspec_columns[idx].name for idx in self._model.input_features()]
+
+  def input_features(self) -> Sequence[InputFeature]:
+    """Returns the input features of the model.
+
+    The features are sorted in increasing order of column_idx.
+    """
+    dataspec_columns = self.data_spec().columns
+    return [
+        InputFeature(
+            name=dataspec_columns[column_idx].name,
+            semantic=dataspec.Semantic.from_proto_type(
+                dataspec_columns[column_idx].type
+            ),
+            column_idx=column_idx,
+        )
+        for column_idx in self._model.input_features()
+    ]
 
 
 ModelType = TypeVar("ModelType", bound=GenericModel)
