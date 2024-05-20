@@ -181,6 +181,11 @@ class RandomForestModel : public AbstractModel, public DecisionForestInterface {
     return &out_of_bag_evaluations_;
   }
 
+  const std::vector<proto::OutOfBagTrainingEvaluations>&
+  out_of_bag_evaluations() const {
+    return out_of_bag_evaluations_;
+  }
+
   std::vector<std::string> AvailableVariableImportances() const override;
 
   // List the variable importances that can be computed from the model
@@ -238,6 +243,8 @@ class RandomForestModel : public AbstractModel, public DecisionForestInterface {
   Testing* Testing() { return &testing_; }
 
   absl::StatusOr<utils::plot::MultiPlot> PlotTrainingLogs() const override;
+
+  std::string DebugCompare(const AbstractModel& other) const override;
 
  private:
   // The decision trees.

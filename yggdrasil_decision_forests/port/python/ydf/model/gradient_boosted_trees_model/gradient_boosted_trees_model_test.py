@@ -15,7 +15,7 @@
 """Tests for the Gradient Boosted trees models."""
 
 import os
-from typing import Tuple
+from typing import Dict, Tuple
 
 from absl import logging
 from absl.testing import absltest
@@ -45,10 +45,20 @@ class GradientBoostedTreesTest(absltest.TestCase):
 
   def setUp(self):
     super().setUp()
-    model_path = os.path.join(
+    # This model is a classification model for pure serving.
+    adult_binary_class_gbdt_path = os.path.join(
         test_utils.ydf_test_data_path(), "model", "adult_binary_class_gbdt"
     )
-    self.adult_binary_class_gbdt = model_lib.load_model(model_path)
+    self.adult_binary_class_gbdt = model_lib.load_model(
+        adult_binary_class_gbdt_path
+    )
+    # This model is a classification model with full training logs.
+    gbt_adult_base_with_na_path = os.path.join(
+        test_utils.ydf_test_data_path(), "golden", "gbt_adult_base_with_na"
+    )
+    self.gbt_adult_base_with_na = model_lib.load_model(
+        gbt_adult_base_with_na_path
+    )
 
   def test_input_feature_names(self):
     self.assertEqual(
@@ -112,9 +122,45 @@ class GradientBoostedTreesTest(absltest.TestCase):
     validation_loss = self.adult_binary_class_gbdt.validation_loss()
     self.assertAlmostEqual(validation_loss, 0.573842942, places=6)
 
+  def test_validation_loss_if_no_validation_dataset(self):
+    dataset = {"x": np.array([0, 0, 1, 1]), "y": np.array([0, 0, 0, 1])}
+    model = specialized_learners.GradientBoostedTreesLearner(
+        label="y", validation_ratio=0.0, num_trees=2
+    ).train(dataset)
+    validation_loss = model.validation_loss()
+    self.assertIsNone(validation_loss)
+
   def test_initial_predictions(self):
     initial_predictions = self.adult_binary_class_gbdt.initial_predictions()
     np.testing.assert_allclose(initial_predictions, [-1.1630996])
+
+  def test_validation_evaluation_empty(self):
+    dataset = {
+        "x1": np.array([0, 0, 0, 1, 1, 1]),
+        "y": np.array([0, 0, 0, 0, 1, 1]),
+    }
+    model = specialized_learners.GradientBoostedTreesLearner(
+        label="y",
+        num_trees=1,
+        max_depth=4,
+        min_examples=1,
+        validation_ratio=0.0,
+    ).train(dataset)
+    self.assertIsInstance(
+        model, gradient_boosted_trees_model.GradientBoostedTreesModel
+    )
+    validation_evaluation = model.validation_evaluation()
+    self.assertIsNone(validation_evaluation.accuracy)
+    self.assertEqual(validation_evaluation.__str__(), "No metrics")
+
+  def test_validation_evaluation_no_training_logs(self):
+    validation_evaluation = self.adult_binary_class_gbdt.validation_evaluation()
+    self.assertIsNone(validation_evaluation.accuracy)
+    self.assertAlmostEqual(validation_evaluation.loss, 0.57384294)
+
+  def test_validation_evaluation_with_content(self):
+    validation_evaluation = self.gbt_adult_base_with_na.validation_evaluation()
+    self.assertAlmostEqual(validation_evaluation.accuracy, 0.8498403)
 
   def test_variable_importances(self):
     model_path = os.path.join(
@@ -227,7 +273,8 @@ class EditModelTest(absltest.TestCase):
   def create_model_and_dataset(
       self,
   ) -> Tuple[
-      gradient_boosted_trees_model.GradientBoostedTreesModel, pd.DataFrame
+      gradient_boosted_trees_model.GradientBoostedTreesModel,
+      Dict[str, np.ndarray],
   ]:
     dataset = {
         "x1": np.array([0, 0, 0, 1, 1, 1]),

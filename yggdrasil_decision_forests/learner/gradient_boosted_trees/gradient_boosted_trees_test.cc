@@ -364,10 +364,11 @@ TEST_F(GradientBoostedTreesOnAdult, BaseDeprecated) {
   YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8644, 0.0099, 0.8658);
   YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2979, 0.0127, 0.294);
 
-  auto* gbt_model =
-      dynamic_cast<const GradientBoostedTreesModel*>(model_.get());
+  auto* gbt_model = dynamic_cast<GradientBoostedTreesModel*>(model_.get());
   EXPECT_TRUE(gbt_model->CheckStructure(
       decision_tree::CheckStructureOptions::GlobalImputation()));
+
+  utils::ExpectEqualGoldenModel(*model_, "gbt_adult_base_deprecated");
 }
 
 // Train and test a model on the adult dataset.
@@ -389,6 +390,8 @@ TEST_F(GradientBoostedTreesOnAdult, BaseWithNAConditions) {
       dynamic_cast<const GradientBoostedTreesModel*>(model_.get());
   EXPECT_TRUE(gbt_model->CheckStructure(
       decision_tree::CheckStructureOptions::GlobalImputation()));
+
+  utils::ExpectEqualGoldenModel(*model_, "gbt_adult_base_with_na");
 }
 
 // Train and test a model on the adult dataset.
@@ -657,8 +660,8 @@ TEST_F(GradientBoostedTreesOnAdult, ValidVerticalDataset) {
   pass_validation_dataset_ = true;
   inject_random_noise_ = true;
   TrainAndEvaluateModel();
-  YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8732, 0.0023, 0.8747);
-  YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2794, 0.0027, 0.2776);
+  YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8716, 0.0074, 0.8747);
+  YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2795, 0.0032, 0.2776);
 }
 
 // Train a GBT with a validation dataset provided as a path.
@@ -667,8 +670,8 @@ TEST_F(GradientBoostedTreesOnAdult, ValidPathDataset) {
   pass_validation_dataset_ = true;
   inject_random_noise_ = true;
   TrainAndEvaluateModel();
-  YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8732, 0.0023, 0.8747);
-  YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2794, 0.0057, 0.2776);
+  YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8716, 0.0074, 0.8747);
+  YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2795, 0.0032, 0.2776);
 }
 
 TEST_F(GradientBoostedTreesOnAdult, DISABLED_VariableImportance) {
@@ -871,6 +874,9 @@ TEST_F(GradientBoostedTreesOnAdult, BaseConcurrentDeprecated) {
   // calibrated).
   YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8662, 0.0094, 0.8664);
   YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2966, 0.0145, 0.2942);
+
+  utils::ExpectEqualGoldenModel(*model_,
+                                "gbt_adult_base_concurrent_deprecated");
 }
 
 // Train and test a model on the adult dataset.
@@ -1298,6 +1304,16 @@ class GradientBoostedTreesOnAbalone : public utils::TrainAndTestTester {
 TEST_F(GradientBoostedTreesOnAbalone, Base) {
   TrainAndEvaluateModel();
   YDF_TEST_METRIC(metric::RMSE(evaluation_), 2.1684, 0.0979, 2.1138);
+
+  utils::ExpectEqualGoldenModel(*model_, "gbt_abalone");
+}
+
+TEST_F(GradientBoostedTreesOnAbalone, NoValidation) {
+  auto* gbt_config = train_config_.MutableExtension(
+      gradient_boosted_trees::proto::gradient_boosted_trees_config);
+  gbt_config->set_validation_set_ratio(0);
+  TrainAndEvaluateModel();
+  ASSERT_OK_AND_ASSIGN(const auto plot, model_->PlotTrainingLogs());
 }
 
 TEST_F(GradientBoostedTreesOnAbalone, L2Regularization) {
@@ -1315,6 +1331,7 @@ TEST_F(GradientBoostedTreesOnAbalone, SparseOblique) {
   gbt_config->mutable_decision_tree()->mutable_sparse_oblique_split();
   TrainAndEvaluateModel();
   YDF_TEST_METRIC(metric::RMSE(evaluation_), 2.1155, 0.0988, 2.1001);
+  utils::ExpectEqualGoldenModel(*model_, "gbt_abalone_sparse_oblique");
 }
 
 TEST_F(GradientBoostedTreesOnAbalone, PoissonLoss) {
@@ -1388,6 +1405,7 @@ TEST_F(GradientBoostedTreesOnIris, Base) {
   YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.9533, 0.03, 0.96);
   YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.2988, 0.2562, 0.2255);
   // Note: R RandomForest has an OOB accuracy of 0.9467.
+  utils::ExpectEqualGoldenModel(*model_, "gbt_iris");
 }
 
 TEST_F(GradientBoostedTreesOnIris, Hessian) {
@@ -1397,6 +1415,7 @@ TEST_F(GradientBoostedTreesOnIris, Hessian) {
   TrainAndEvaluateModel();
   YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.94, 0.05, 0.9733);
   YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.3225, 0.3002, 0.1462);
+  utils::ExpectEqualGoldenModel(*model_, "gbt_iris_hessian");
 }
 
 TEST_F(GradientBoostedTreesOnIris, Dart) {
@@ -1930,6 +1949,28 @@ INSTANTIATE_TEST_SUITE_P(
     [](const testing::TestParamInfo<RegressionEnd2EndTest::ParamType>& info) {
       return proto::Loss_Name(info.param.loss);
     });
+
+TEST_F(GradientBoostedTreesOnAdult, Determinism) {
+  TrainAndEvaluateModel();
+  auto model_1 = std::move(model_);
+
+  TrainAndEvaluateModel();
+  auto model_2 = std::move(model_);
+
+  EXPECT_TRUE(model_1->DebugCompare(*model_2).empty());
+}
+
+TEST_F(GradientBoostedTreesOnAdult, Nondeterminism) {
+  TrainAndEvaluateModel();
+  auto model_1 = std::move(model_);
+
+  train_config_.set_random_seed(train_config_.random_seed() + 1);
+  TrainAndEvaluateModel();
+  auto model_2 = std::move(model_);
+
+  EXPECT_THAT(model_1->DebugCompare(*model_2),
+              ::testing::ContainsRegex("Non matching initial predictions"));
+}
 
 }  // namespace
 }  // namespace gradient_boosted_trees

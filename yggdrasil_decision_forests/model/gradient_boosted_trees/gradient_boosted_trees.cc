@@ -759,15 +759,19 @@ GradientBoostedTreesModel::PlotTrainingLogs() const {
     validation_metric->label = "validation";
 
     for (const auto& entry : training_logs_.entries()) {
-      // X axis
+      // Training loss
       training_metric->xs.push_back(entry.number_of_trees());
-      validation_metric->xs.push_back(entry.number_of_trees());
-
-      // Y axis
       training_metric->ys.push_back(
           entry.training_secondary_metrics(metric_idx));
-      validation_metric->ys.push_back(
-          entry.validation_secondary_metrics(metric_idx));
+
+      // Validation loss
+      const bool has_validation =
+          metric_idx < entry.validation_secondary_metrics_size();
+      if (has_validation) {
+        validation_metric->xs.push_back(entry.number_of_trees());
+        validation_metric->ys.push_back(
+            entry.validation_secondary_metrics(metric_idx));
+      }
     }
   }
 
@@ -795,6 +799,25 @@ absl::Status GradientBoostedTreesModel::Distance(
   }
   return decision_tree::Distance(decision_trees(), dataset1, dataset2,
                                  distances, tree_weights);
+}
+
+std::string GradientBoostedTreesModel::DebugCompare(
+    const AbstractModel& other) const {
+  if (const auto parent_compare = AbstractModel::DebugCompare(other);
+      !parent_compare.empty()) {
+    return parent_compare;
+  }
+  const auto* other_cast =
+      dynamic_cast<const GradientBoostedTreesModel*>(&other);
+  if (!other_cast) {
+    return "Non matching types";
+  }
+  if (initial_predictions_ != other_cast->initial_predictions_) {
+    return absl::StrCat("Non matching initial predictions");
+  }
+
+  return decision_tree::DebugCompare(
+      data_spec_, label_col_idx_, decision_trees_, other_cast->decision_trees_);
 }
 
 namespace internal {

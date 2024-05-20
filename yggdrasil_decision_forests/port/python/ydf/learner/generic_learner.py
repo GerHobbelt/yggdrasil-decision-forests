@@ -115,7 +115,7 @@ class GenericLearner:
       self,
       ds: dataset.InputDataset,
       valid: Optional[dataset.InputDataset] = None,
-  ) -> generic_model.GenericModel:
+  ) -> generic_model.ModelType:
     """Trains a model on the given dataset.
 
     Options for dataset reading are given on the learner. Consult the
@@ -159,8 +159,8 @@ class GenericLearner:
       ds: Training dataset.
       valid: Optional validation dataset. Some learners, such as Random Forest,
         do not need validation dataset. Some learners, such as
-        GradientBoostdTrees, automatically extract a validation from the
-        training dataset if the validation dataset is not provided.
+        GradientBoostedTrees, automatically extract a validation dataset from
+        the training dataset if the validation dataset is not provided.
 
     Returns:
       A trained model.
@@ -190,7 +190,7 @@ Hyper-parameters: ydf.{self._hyperparameters}
 
   def _train_from_path(
       self, ds: str, valid: Optional[str]
-  ) -> generic_model.GenericModel:
+  ) -> generic_model.ModelType:
     """Trains a model from a file path (dataset reading in YDF C++)."""
     with log.cc_log_context():
       if self._data_spec is not None:
@@ -206,7 +206,7 @@ Hyper-parameters: ydf.{self._hyperparameters}
       self,
       ds: dataset.InputDataset,
       valid: Optional[dataset.InputDataset] = None,
-  ) -> generic_model.GenericModel:
+  ) -> generic_model.ModelType:
     """Trains a model from in-memory data."""
 
     with log.cc_log_context():
@@ -324,7 +324,7 @@ Hyper-parameters: ydf.{self._hyperparameters}
     learner = ydf.RandomForestLearner(label="label")
     evaluation = learner.cross_validation(dataset)
 
-    # In notebook, display an interractive evaluation
+    # In a notebook, display an interractive evaluation
     evaluation
 
     # Print the evaluation
