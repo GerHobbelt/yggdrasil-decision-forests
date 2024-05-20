@@ -16,7 +16,8 @@
 
 import dataclasses
 import os
-from typing import Optional, TypeVar, Union
+import tempfile
+from typing import Any, Literal, Optional, TypeVar, Union
 
 from absl import logging
 import numpy as np
@@ -29,6 +30,8 @@ from ydf.dataset import dataset
 from ydf.metric import metric
 from ydf.model import analysis
 from ydf.model import template_cpp_export
+from ydf.utils import html
+from ydf.utils import log
 from yggdrasil_decision_forests.utils import model_analysis_pb2
 
 # TODO: Allow a simpler input type (e.g. string)
@@ -65,10 +68,34 @@ class GenericModel:
 
     return self._model.task()
 
-  def describe(self, full_details: bool = False) -> str:
-    """Description of the model."""
+  def describe(
+      self,
+      format: Literal["auto", "text", "notebook", "html"] = "auto",
+      full_details: bool = False,
+  ) -> Union[str, html.HtmlNotebookDisplay]:
+    """Description of the model.
 
-    return self._model.Describe(full_details)
+    Args:
+      format: Format of the display: - auto: Use the "notebook" format if
+        executed in an IPython notebook. Otherwise, use the "text" format. -
+        text: Text description of the model. - html: Html description of the
+          model. -
+        notebook: Html description of the model displayed in a notebook cell.
+      full_details: Should the full model be printed. This can be large.
+
+    Returns:
+      The model description.
+    """
+
+    if format == "auto":
+      format = "text" if log.is_direct_output() else "notebook"
+
+    with log.cc_log_context():
+      description = self._model.Describe(full_details, format == "text")
+      if format == "notebook":
+        return html.HtmlNotebookDisplay(description)
+      else:
+        return description
 
   def data_spec(self) -> data_spec_pb2.DataSpecification:
     """Returns the data spec used for train the model."""
@@ -126,10 +153,14 @@ Use `model.describe()` for more details
       raise ValueError(
           f"The batch size of the benchmark must be positive, got {batch_size}."
       )
-    vds = dataset.create_vertical_dataset(ds, data_spec=self._model.data_spec())
-    result = self._model.Benchmark(
-        vds._dataset, benchmark_duration, warmup_duration, batch_size
-    )
+
+    with log.cc_log_context():
+      vds = dataset.create_vertical_dataset(
+          ds, data_spec=self._model.data_spec()
+      )
+      result = self._model.Benchmark(
+          vds._dataset, benchmark_duration, warmup_duration, batch_size
+      )
     return result
 
   def save(self, path, advanced_options=ModelIOOptions()) -> None:
@@ -142,9 +173,8 @@ Use `model.describe()` for more details
     https://ydf.readthedocs.io/en/latest/convert_model.html for more information
     about the YDF model format.
 
-    YDF models can also be exported to other formats, see the methods under
-    `export` for details.
-    # TODO: Implement model exports and update this description.
+    YDF models can also be exported to other formats, see
+    `to_tensorflow_saved_model()` and `to_cpp()` for details
 
     Usage example:
 
@@ -179,13 +209,15 @@ Use `model.describe()` for more details
                   path,
               )
 
-    self._model.Save(path, advanced_options.file_prefix)
+    with log.cc_log_context():
+      self._model.Save(path, advanced_options.file_prefix)
 
   def predict(self, data: dataset.InputDataset) -> np.ndarray:
-    ds = dataset.create_vertical_dataset(
-        data, data_spec=self._model.data_spec()
-    )
-    result = self._model.Predict(ds._dataset)  # pylint: disable=protected-access
+    with log.cc_log_context():
+      ds = dataset.create_vertical_dataset(
+          data, data_spec=self._model.data_spec()
+      )
+      result = self._model.Predict(ds._dataset)  # pylint: disable=protected-access
     return result
 
   def evaluate(
@@ -232,26 +264,28 @@ Use `model.describe()` for more details
       Model evaluation.
     """
 
-    ds = dataset.create_vertical_dataset(
-        data, data_spec=self._model.data_spec()
-    )
-
-    if isinstance(bootstrapping, bool):
-      bootstrapping_samples = 2000 if bootstrapping else -1
-    elif isinstance(bootstrapping, int) and bootstrapping >= 100:
-      bootstrapping_samples = bootstrapping
-    else:
-      raise ValueError(
-          "bootstrapping argument should be boolean or an integer greater than"
-          " 100 as bootstrapping will not yield useful results. Got"
-          f" {bootstrapping!r} instead"
+    with log.cc_log_context():
+      ds = dataset.create_vertical_dataset(
+          data, data_spec=self._model.data_spec()
       )
 
-    options_proto = metric_pb2.EvaluationOptions(
-        bootstrapping_samples=bootstrapping_samples,
-        task=self._model.task(),
-    )
-    evaluation_proto = self._model.Evaluate(ds._dataset, options_proto)  # pylint: disable=protected-access
+      if isinstance(bootstrapping, bool):
+        bootstrapping_samples = 2000 if bootstrapping else -1
+      elif isinstance(bootstrapping, int) and bootstrapping >= 100:
+        bootstrapping_samples = bootstrapping
+      else:
+        raise ValueError(
+            "bootstrapping argument should be boolean or an integer greater"
+            " than 100 as bootstrapping will not yield useful results. Got"
+            f" {bootstrapping!r} instead"
+        )
+
+      options_proto = metric_pb2.EvaluationOptions(
+          bootstrapping_samples=bootstrapping_samples,
+          task=self._model.task(),
+      )
+
+      evaluation_proto = self._model.Evaluate(ds._dataset, options_proto)  # pylint: disable=protected-access
     return metric.Evaluation(evaluation_proto)
 
   def analyze(
@@ -314,31 +348,32 @@ Use `model.describe()` for more details
       Model analysis.
     """
 
-    ds = dataset.create_vertical_dataset(
-        data, data_spec=self._model.data_spec()
-    )
+    with log.cc_log_context():
+      ds = dataset.create_vertical_dataset(
+          data, data_spec=self._model.data_spec()
+      )
 
-    options_proto = model_analysis_pb2.Options(
-        num_threads=num_threads,
-        pdp=model_analysis_pb2.Options.PlotConfig(
-            enabled=partial_depepence_plot,
-            example_sampling=sampling,
-            num_numerical_bins=num_bins,
-        ),
-        cep=model_analysis_pb2.Options.PlotConfig(
-            enabled=conditional_expectation_plot,
-            example_sampling=sampling,
-            num_numerical_bins=num_bins,
-        ),
-        permuted_variable_importance=model_analysis_pb2.Options.PermutedVariableImportance(
-            enabled=permutation_variable_importance_rounds > 0,
-            num_rounds=permutation_variable_importance_rounds,
-        ),
-        include_model_structural_variable_importances=True,
-    )
+      options_proto = model_analysis_pb2.Options(
+          num_threads=num_threads,
+          pdp=model_analysis_pb2.Options.PlotConfig(
+              enabled=partial_depepence_plot,
+              example_sampling=sampling,
+              num_numerical_bins=num_bins,
+          ),
+          cep=model_analysis_pb2.Options.PlotConfig(
+              enabled=conditional_expectation_plot,
+              example_sampling=sampling,
+              num_numerical_bins=num_bins,
+          ),
+          permuted_variable_importance=model_analysis_pb2.Options.PermutedVariableImportance(
+              enabled=permutation_variable_importance_rounds > 0,
+              num_rounds=permutation_variable_importance_rounds,
+          ),
+          include_model_structural_variable_importances=True,
+      )
 
-    analysis_proto = self._model.Analyze(ds._dataset, options_proto)  # pylint: disable=protected-access
-    return analysis.Analysis(analysis_proto, options_proto)
+      analysis_proto = self._model.Analyze(ds._dataset, options_proto)  # pylint: disable=protected-access
+      return analysis.Analysis(analysis_proto, options_proto)
 
   def to_cpp(self, key: str = "my_model") -> str:
     """Generates the code of a .h file to run the model in C++.
@@ -361,18 +396,90 @@ Use `model.describe()` for more details
       input features with placeholder values. Therefore, you will want to add
       your input as arguments to the "Predict" function, and use it to populate
       the "examples->Set..." section accordingly.
-    5. (Bonus) To further speed-up inference speed, you can pre-allocate and
-      reuse the "examples" and "predictions" for each model running threads.
+    5. (Bonus) You can further optimize the inference speed by pre-allocating
+      and re-using the examples and predictions for each thread running the
+      model.
 
     This documentation is also available in the header of the generated content
     for more details.
 
     Args:
       key: Name of the model. Used to define the c++ namespace of the model.
+
+    Returns:
+      String containing an example header for running the model in C++.
     """
     return template_cpp_export.template(
         key, self._model.data_spec(), self._model.input_features()
     )
+
+  def to_tensorflow_saved_model(
+      self, path: str, input_model_signature_fn: Any = None
+  ) -> None:
+    """Exports the model as a TensorFlow Saved model.
+
+    The generated model is a Tensorflow SavedModel that requires the TensorFlow
+    Decision Forests custom ops. It is compatible with TF Serving and
+    Tensorflow.js, but it may not be compatible with other TensorFlow libraries.
+    The signature of the resulting model is determined automatically based on
+    the dataspec of the model unless given by `input_model_signature_fn`.
+
+    Requires Tensorflow Decision Forests to be installed.
+
+    Usage example:
+
+    ```python
+    !pip install tensorflow_decision_forests
+    import tensorflow as tf
+    import tensorflow_decision_forests as tfdf
+    import ydf
+    import pandas as pd
+
+    path_to_tfdf_model = '/path/to/tfdfmodel'
+    # `model` is a model trained with ydf.
+    model.to_tensorflow_saved_model(path=path_to_tfdf_model)
+
+    # Load the dataset and convert to TensorFlow
+    test_df = pd.read_csv(test_dataset_path)
+    tf_test = tfdf.keras.pd_dataframe_to_tf_dataset(test_df, "Rings")
+
+    # Load the model with TF-DF.
+    tf_model = tf.keras.models.load_model(path_to_tfdf_model)
+    # Run predictions with TF-DF
+    tfdf_predictions = tf_model.predict(tf_test)
+    ```
+
+    Args:
+      path: Path to store the Tensorflow Decision Forests model.
+      input_model_signature_fn: A lambda that returns the
+        (Dense,Sparse,Ragged)TensorSpec (or structure of TensorSpec e.g.
+        dictionary, list) corresponding to input signature of the model. If not
+        specified, the input model signature is created by
+        `tfdf.keras.build_default_input_model_signature`. For example, specify
+        `input_model_signature_fn` if an numerical input feature (which is
+        consumed as DenseTensorSpec(float32) by default) will be feed
+        differently (e.g. RaggedTensor(int64)).
+    """
+    try:
+      import tensorflow_decision_forests as tfdf  # pylint:disable-import-not-at-top
+    except ImportError as exc:
+      raise ValueError(
+          "Exporting to tensorflow requires the tensorflow_decision_forests"
+          " package to be installed. When using pip, run `pip install"
+          " tensorflow_decision_forests`"
+      ) from exc
+    # Do not pass input_model_signature_fn if it is None.
+    not_none_params = {}
+    if input_model_signature_fn is not None:
+      not_none_params["input_model_signature_fn"] = input_model_signature_fn
+    with tempfile.TemporaryDirectory() as tmpdirname:
+      self.save(tmpdirname)
+      tfdf.keras.yggdrasil_model_to_keras_model(
+          src_path=tmpdirname,
+          dst_path=path,
+          verbose=log.current_log_level(),
+          **not_none_params,
+      )
 
   def hyperparameter_optimizer_logs(
       self,

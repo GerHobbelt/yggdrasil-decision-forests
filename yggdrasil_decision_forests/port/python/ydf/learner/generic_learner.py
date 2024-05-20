@@ -15,6 +15,7 @@
 """Definitions for Generic learners."""
 
 import copy
+import datetime
 import os
 import re
 from typing import Optional, Union
@@ -34,6 +35,7 @@ from ydf.learner import tuner as tuner_lib
 from ydf.metric import metric
 from ydf.model import generic_model
 from ydf.model import model_lib
+from ydf.utils import log
 from yggdrasil_decision_forests.utils import fold_generator_pb2
 
 Task = generic_model.Task
@@ -106,6 +108,10 @@ class GenericLearner:
     if tuner:
       tuner.set_base_learner(learner_name)
 
+  @property
+  def hyperparameters(self) -> hyperparameters.HyperParameters:
+    return self._hyperparameters
+
   def train(
       self,
       ds: dataset.InputDataset,
@@ -175,14 +181,15 @@ class GenericLearner:
       self, ds: str, valid: Optional[str]
   ) -> generic_model.GenericModel:
     """Trains a model from a file path (dataset reading in YDF C++)."""
-    if self._data_spec is not None:
-      cc_model = self._get_learner().TrainFromPathWithDataSpec(
-          ds, self._data_spec, valid
-      )
-    else:
-      guide = self._build_data_spec_args().to_proto_guide()
-      cc_model = self._get_learner().TrainFromPathWithGuide(ds, guide, valid)
-    return model_lib.load_cc_model(cc_model)
+    with log.cc_log_context():
+      if self._data_spec is not None:
+        cc_model = self._get_learner().TrainFromPathWithDataSpec(
+            ds, self._data_spec, valid
+        )
+      else:
+        guide = self._build_data_spec_args().to_proto_guide()
+        cc_model = self._get_learner().TrainFromPathWithGuide(ds, guide, valid)
+      return model_lib.load_cc_model(cc_model)
 
   def train_from_dataset(
       self,
@@ -190,24 +197,40 @@ class GenericLearner:
       valid: Optional[dataset.InputDataset] = None,
   ) -> generic_model.GenericModel:
     """Trains a model from in-memory data."""
-    train_args = {
-        "dataset": self._get_vertical_dataset(ds)._dataset  # pylint: disable=protected-access
-    }
+    
+    with log.cc_log_context():
+      train_ds = self._get_vertical_dataset(ds)._dataset # pylint: disable=protected-access
+      train_args = {"dataset": train_ds}
 
-    if valid is not None:
-      if not self.__class__.capabilities().support_validation_dataset:
-        raise ValueError(
-            f"The learner {self.__class__.__name__!r} does not use a validation"
-            " dataset. If you can, add the validation examples to the training"
-            " dataset."
+      if valid is not None:
+        if not self.__class__.capabilities().support_validation_dataset:
+          raise ValueError(
+              f"The learner {self.__class__.__name__!r} does not use a"
+              " validation dataset. If you can, add the validation examples to"
+              " the training dataset."
+          )
+
+        valid_ds = self._get_vertical_dataset(valid)._dataset  # pylint: disable=protected-access
+        train_args["validation_dataset"] = valid_ds
+        log.info(
+            "Train model on %d training examples and %d validation examples",
+            train_ds.nrow(),
+            valid_ds.nrow(),
+        )
+      else:
+        log.info(
+            "Train model on %d examples",
+            train_ds.nrow(),
         )
 
-      train_args["validation_dataset"] = self._get_vertical_dataset(
-          valid
-      )._dataset  # pylint: disable=protected-access
+      time_begin_training_model = datetime.datetime.now()
+      cc_model = self._get_learner().Train(**train_args)
+      log.info(
+          "Model trained in %s",
+          datetime.datetime.now() - time_begin_training_model,
+      )
 
-    cc_model = self._get_learner().Train(**train_args)
-    return model_lib.load_cc_model(cc_model)
+      return model_lib.load_cc_model(cc_model)
 
   def _get_training_config(self) -> abstract_learner_pb2.TrainingConfig:
     """Gets the training config proto."""
@@ -344,13 +367,14 @@ class GenericLearner:
     vertical_dataset = self._get_vertical_dataset(ds)
     learner = self._get_learner()
 
-    evaluation_proto = learner.Evaluate(
-        vertical_dataset._dataset,  # pylint: disable=protected-access
-        fold_generator,
-        evaluation_options,
-        deployment_evaluation,
-    )
-    return metric.Evaluation(evaluation_proto)
+    with log.cc_log_context():
+      evaluation_proto = learner.Evaluate(
+          vertical_dataset._dataset,  # pylint: disable=protected-access
+          fold_generator,
+          evaluation_options,
+          deployment_evaluation,
+      )
+      return metric.Evaluation(evaluation_proto)
 
   def _build_data_spec_args(self) -> dataspec.DataSpecInferenceArgs:
     """Builds DS args with user inputs and guides for labels / special columns.
@@ -457,20 +481,20 @@ class GenericLearner:
   def _build_deployment_config(
       self,
       num_threads: Optional[int],
-      try_resume_training: bool,
+      resume_training: bool,
       resume_training_snapshot_interval_seconds: int,
-      cache_path: Optional[str],
+      working_dir: Optional[str],
   ):
     if num_threads is None:
-      num_threads = self.determine_optimal_num_threads()
+      num_threads = self._determine_optimal_num_threads()
     return abstract_learner_pb2.DeploymentConfig(
         num_threads=num_threads,
-        try_resume_training=try_resume_training,
-        cache_path=cache_path,
+        try_resume_training=resume_training,
+        cache_path=working_dir,
         resume_training_snapshot_interval_seconds=resume_training_snapshot_interval_seconds,
     )
 
-  def determine_optimal_num_threads(self):
+  def _determine_optimal_num_threads(self):
     """Sets  number of threads to min(num_cpus, 32) or 6 if num_cpus unclear."""
     num_threads = os.cpu_count()
     if num_threads is None:

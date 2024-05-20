@@ -13,8 +13,8 @@
  * limitations under the License.
  */
 
-#ifndef YGGDRASIL_DECISION_FORESTS_PORT_PYTHON_LEARNER_MODEL_H_
-#define YGGDRASIL_DECISION_FORESTS_PORT_PYTHON_LEARNER_MODEL_H_
+#ifndef YGGDRASIL_DECISION_FORESTS_PORT_PYTHON_YDF_LEARNER_MODEL_H_
+#define YGGDRASIL_DECISION_FORESTS_PORT_PYTHON_YDF_LEARNER_MODEL_H_
 
 #include <pybind11/numpy.h>
 
@@ -76,9 +76,8 @@ class GenericCCModel {
 
   model::proto::Task task() const { return model_->task(); }
 
-  std::string Describe(const bool full_details) const {
-    return model_->DescriptionAndStatistics(full_details);
-  }
+  absl::StatusOr<std::string> Describe(bool full_details,
+                                       bool text_format) const;
 
   std::vector<int> input_features() const { return model_->input_features(); }
 
@@ -111,6 +110,10 @@ class GenericCCModel {
 
   const dataset::proto::DataSpecification& data_spec() const {
     return model_->data_spec();
+  }
+
+  void set_data_spec(const dataset::proto::DataSpecification& data_spec) {
+    *model_->mutable_data_spec() = data_spec;
   }
 
   const std::optional<model::proto::HyperparametersOptimizerLogs>&
@@ -206,4 +209,4 @@ std::unique_ptr<GenericCCModel> CreateCCModel(
 
 }  // namespace yggdrasil_decision_forests::port::python
 
-#endif  // YGGDRASIL_DECISION_FORESTS_PORT_PYTHON_LEARNER_MODEL_H_
+#endif  // YGGDRASIL_DECISION_FORESTS_PORT_PYTHON_YDF_LEARNER_MODEL_H_

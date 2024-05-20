@@ -164,6 +164,7 @@ cc_library_ydf(
     deps = [
         ":filesystem",
         ":logging",
+        ":testing_macros",
         ":uid",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest",
@@ -685,6 +686,8 @@ cc_library_ydf(
     hdrs = ["snapshot.h"],
     deps = [
         ":filesystem",
+        ":status_macros",
+        "@com_google_absl//absl/algorithm:container",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -745,6 +748,7 @@ cc_library_ydf(
         ":feature_importance",
         ":filesystem",
         ":html",
+        ":html_content",
         ":model_analysis_cc_proto",
         ":partial_dependence_plot",
         ":partial_dependence_plot_cc_proto",
@@ -755,7 +759,9 @@ cc_library_ydf(
         "//yggdrasil_decision_forests/dataset:vertical_dataset",
         "//yggdrasil_decision_forests/dataset:vertical_dataset_io",
         "//yggdrasil_decision_forests/model:abstract_model",
+        "//yggdrasil_decision_forests/model:describe",
         "//yggdrasil_decision_forests/model:model_engine_wrapper",
+        "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -787,6 +793,23 @@ cc_library_ydf(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
     ],
+)
+
+cc_library_ydf(
+    name = "html_content",
+    srcs = ["html_content.cc"],
+    hdrs = ["html_content.h"],
+    deps = [
+        ":html",
+        ":uid",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library_ydf(
+    name = "documentation",
+    hdrs = ["documentation.h"],
+    deps = ["@com_google_absl//absl/strings"],
 )
 
 # Bzl Libraries
@@ -1123,6 +1146,8 @@ cc_test(
         ":filesystem",
         ":snapshot",
         ":test",
+        ":testing_macros",
+        "@com_google_absl//absl/status",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -1185,6 +1210,17 @@ cc_test(
         "//yggdrasil_decision_forests/model/decision_tree:decision_tree_cc_proto",
         "//yggdrasil_decision_forests/model/random_forest",
         "@com_google_absl//absl/memory",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "html_content_test",
+    srcs = ["html_content_test.cc"],
+    data = ["//yggdrasil_decision_forests/test_data"],
+    deps = [
+        ":html_content",
+        ":test",
         "@com_google_googletest//:gtest_main",
     ],
 )

@@ -17,11 +17,17 @@
 import glob
 import os
 from pathlib import Path
+import platform
 import shutil as s
+
 
 SRC_BIN = "bazel-bin/ydf"
 DST_PK = "tmp_package"
-DST_EXTENSION = "pyd"
+
+if platform.system() == "Windows":
+  DST_EXTENSION = "pyd"
+else:
+  DST_EXTENSION = "so"
 
 
 def rec_glob_copy(src_dir: str, dst_dir: str, pattern: str):
@@ -63,13 +69,6 @@ s.copy(f"{SRC_BIN}/cc/ydf.so", f"{DST_PK}/ydf/cc/ydf.{DST_EXTENSION}")
 os.makedirs(f"{DST_PK}/ydf/learner")
 s.copy(f"{SRC_BIN}/learner/specialized_learners.py", f"{DST_PK}/ydf/learner")
 
-# Absl compiled lib
-os.makedirs(f"{DST_PK}/pybind11_abseil")
-s.copy(
-    "bazel-bin/external/com_google_pybind11_abseil/pybind11_abseil/status.so",
-    f"{DST_PK}/pybind11_abseil/status.{DST_EXTENSION}",
-)
-
 # The YDF protos
 rec_glob_copy(
     "bazel-bin/external/ydf_cc/yggdrasil_decision_forests",
@@ -85,5 +84,3 @@ INIT_FILENAME = "__init__.py"
 for path, _, files in os.walk(f"{DST_PK}/yggdrasil_decision_forests"):
   if INIT_FILENAME not in files:
     Path(f"{path}/{INIT_FILENAME}").touch()
-
-Path(f"{DST_PK}/pybind11_abseil/{INIT_FILENAME}").touch()

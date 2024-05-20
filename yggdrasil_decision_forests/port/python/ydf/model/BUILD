@@ -38,6 +38,7 @@ pybind_library(
         "@ydf_cc//yggdrasil_decision_forests/metric:metric_cc_proto",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_cc_proto",
+        "@ydf_cc//yggdrasil_decision_forests/model:describe",
         "@ydf_cc//yggdrasil_decision_forests/model:model_library",
         "@ydf_cc//yggdrasil_decision_forests/model/decision_tree:decision_forest_interface",
         "@ydf_cc//yggdrasil_decision_forests/model/gradient_boosted_trees",
@@ -49,6 +50,7 @@ pybind_library(
         "@ydf_cc//yggdrasil_decision_forests/utils:model_analysis_cc_proto",
         "@ydf_cc//yggdrasil_decision_forests/utils:random",
         "@ydf_cc//yggdrasil_decision_forests/utils:status_macros",
+        "@ydf_cc//yggdrasil_decision_forests/utils:uid",
         "@ydf_cc//yggdrasil_decision_forests/utils/benchmark:inference",
     ],
 )
@@ -59,9 +61,9 @@ pybind_library(
     hdrs = ["model.h"],
     deps = [
         ":model_wrapper",
+        "//ydf/utils:status_casters",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_pybind11_abseil//pybind11_abseil:status_casters",
         "@com_google_pybind11_protobuf//pybind11_protobuf:native_proto_caster",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model",
         "@ydf_cc//yggdrasil_decision_forests/model:model_library",
@@ -81,12 +83,15 @@ py_library(
         ":template_cpp_export",
         # absl/logging dep,
         # numpy dep,
+        # tensorflow_decision_forests dep,
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "@ydf_cc//yggdrasil_decision_forests/metric:metric_py_proto",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_py_proto",
         "//ydf/cc:ydf",
         "//ydf/dataset",
         "//ydf/metric",
+        "//ydf/utils:html",
+        "//ydf/utils:log",
         "@ydf_cc//yggdrasil_decision_forests/utils:model_analysis_py_proto",
     ],
 )
@@ -157,10 +162,7 @@ py_test(
     name = "model_test",
     srcs = ["model_test.py"],
     data = [
-        # absl/testing:absltest dep,
-        # numpy dep,
-        # pandas dep,
-        "//ydf/test_data",
+        "//test_data",
         "@ydf_cc//yggdrasil_decision_forests/test_data",
     ],
     python_version = "PY3",
@@ -168,6 +170,30 @@ py_test(
         ":generic_model",
         ":model_lib",
         ":random_forest_model",
+        # absl/testing:absltest dep,
+        # numpy dep,
+        # pandas dep,
+        "//ydf/utils:test_utils",
+    ],
+)
+
+py_test(
+    name = "tf_model_test",
+    srcs = ["tf_model_test.py"],
+    data = [
+        "//test_data",
+        "@ydf_cc//yggdrasil_decision_forests/test_data",
+    ],
+    python_version = "PY3",
+    # TODO: This test fails in OSS due to a package name clash on yggdrasil_decision_forests.
+    tags = ["manual"],
+    deps = [
+        ":model_lib",
+        # absl/testing:absltest dep,
+        # numpy dep,
+        # pandas dep,
+        # tensorflow dep,
+        # tensorflow_decision_forests dep,
         "//ydf/utils:test_utils",
     ],
 )

@@ -31,7 +31,6 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/optional.h"
-#include "pybind11_abseil/status_casters.h"
 #include "pybind11_protobuf/native_proto_caster.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/data_spec_inference.h"
@@ -43,6 +42,7 @@
 #include "yggdrasil_decision_forests/model/abstract_model.h"
 #include "yggdrasil_decision_forests/model/hyperparameter.pb.h"
 #include "ydf/model/model_wrapper.h"
+#include "ydf/utils/status_casters.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
 
 namespace py = ::pybind11;
@@ -130,10 +130,10 @@ class GenericCCLearner {
           std::reference_wrapper<const dataset::VerticalDataset>>
           validation_dataset = std::nullopt) const {
     EnableUserInterruption();
-    ASSIGN_OR_RETURN(auto model,
-                     learner_->TrainWithStatus(dataset, validation_dataset));
+    auto model = learner_->TrainWithStatus(dataset, validation_dataset);
     DisableUserInterruption();
-    return CreateCCModel(std::move(model));
+    RETURN_IF_ERROR(model.status());
+    return CreateCCModel(std::move(*model));
   }
 
   absl::StatusOr<std::unique_ptr<GenericCCModel>> TrainFromPathWithDataSpec(
@@ -149,11 +149,11 @@ class GenericCCLearner {
                        dataset::GetTypedPath(validation_dataset_path.value()));
     }
     EnableUserInterruption();
-    ASSIGN_OR_RETURN(auto model,
-                     learner_->TrainWithStatus(typed_dataset_path, data_spec,
-                                               typed_valid_path));
+    auto model = learner_->TrainWithStatus(typed_dataset_path, data_spec,
+                                           typed_valid_path);
     DisableUserInterruption();
-    return CreateCCModel(std::move(model));
+    RETURN_IF_ERROR(model.status());
+    return CreateCCModel(std::move(*model));
   }
 
   absl::StatusOr<std::unique_ptr<GenericCCModel>> TrainFromPathWithGuide(
@@ -210,24 +210,25 @@ absl::StatusOr<std::unique_ptr<GenericCCLearner>> GetLearner(
 }  // namespace
 
 void init_learner(py::module_& m) {
-  m.def("GetLearner", &GetLearner);
+  m.def("GetLearner", WithStatusOr(GetLearner));
   py::class_<GenericCCLearner>(m, "GenericCCLearner")
       .def("__repr__",
            [](const GenericCCLearner& a) {
              return "<learner_cc.GenericCCLearner";
            })
-      .def("Train", &GenericCCLearner::Train, py::arg("dataset"),
-           py::arg("validation_dataset") = py::none())
+      .def("Train", WithStatusOr(&GenericCCLearner::Train),
+           py::arg("dataset"), py::arg("validation_dataset") = py::none())
       .def("TrainFromPathWithDataSpec",
-           &GenericCCLearner::TrainFromPathWithDataSpec,
+           WithStatusOr(&GenericCCLearner::TrainFromPathWithDataSpec),
            py::arg("dataset_path"), py::arg("data_spec"),
            py::arg("validation_dataset_path"))
-      .def("TrainFromPathWithGuide", &GenericCCLearner::TrainFromPathWithGuide,
+      .def("TrainFromPathWithGuide",
+           WithStatusOr(&GenericCCLearner::TrainFromPathWithGuide),
            py::arg("dataset_path"), py::arg("data_spec_guide"),
            py::arg("validation_dataset_path"))
-      .def("Evaluate", &GenericCCLearner::Evaluate, py::arg("dataset"),
-           py::arg("fold_generator"), py::arg("evaluation_options"),
-           py::arg("deployment_evaluation"));
+      .def("Evaluate", WithStatusOr(&GenericCCLearner::Evaluate),
+           py::arg("dataset"), py::arg("fold_generator"),
+           py::arg("evaluation_options"), py::arg("deployment_evaluation"));
 }
 
 }  // namespace yggdrasil_decision_forests::port::python

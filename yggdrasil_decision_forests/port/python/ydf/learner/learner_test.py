@@ -21,10 +21,10 @@ from typing import Tuple
 
 from absl import logging
 from absl.testing import absltest
+from absl.testing import parameterized
 import numpy as np
 import pandas as pd
 
-from pybind11_abseil import status
 from yggdrasil_decision_forests.dataset import data_spec_pb2
 from yggdrasil_decision_forests.learner import abstract_learner_pb2
 from yggdrasil_decision_forests.model import abstract_model_pb2
@@ -34,7 +34,9 @@ from ydf.learner import generic_learner
 from ydf.learner import specialized_learners
 from ydf.learner import tuner as tuner_lib
 from ydf.metric import metric
+from ydf.model import decision_forest_model
 from ydf.model import generic_model
+from ydf.utils import log
 from ydf.utils import test_utils
 
 ProtoMonotonicConstraint = abstract_learner_pb2.MonotonicConstraint
@@ -334,9 +336,7 @@ class RandomForestLearnerTest(LearnerTest):
     )
     vds_dataset = DatasetForTesting(vds_train, vds_test, pd_dataset.label)
 
-    tuner = tuner_lib.RandomSearchTuner(num_trials=5)
-    tuner.choice("max_depth", [3, 4, 5])
-    tuner.choice("shrinkage", [0.1, 0.2, 0.3])
+    tuner = tuner_lib.RandomSearchTuner(num_trials=5, use_predefined_hps=True)
     learner = specialized_learners.GradientBoostedTreesLearner(
         label=pd_dataset.label,
         tuner=tuner,
@@ -388,6 +388,40 @@ class RandomForestLearnerTest(LearnerTest):
           label="income", num_trees=50
       ).train(train_ds, valid=test_ds)
 
+  def test_compare_pandas_and_path(self):
+    dataset_directory = os.path.join(test_utils.ydf_test_data_path(), "dataset")
+    train_path = os.path.join(dataset_directory, "adult_train.csv")
+    test_path = os.path.join(dataset_directory, "adult_test.csv")
+    label = "income"
+
+    pd_train = pd.read_csv(train_path)
+    pd_test = pd.read_csv(test_path)
+
+    learner = specialized_learners.RandomForestLearner(label=label)
+    model_from_pd = learner.train(pd_train)
+    accuracy_from_pd = model_from_pd.evaluate(pd_test).accuracy
+
+    learner_from_path = specialized_learners.RandomForestLearner(
+        label=label, data_spec=model_from_pd.data_spec()
+    )
+    model_from_path = learner_from_path.train(train_path)
+    accuracy_from_path = model_from_path.evaluate(pd_test).accuracy
+
+    self.assertAlmostEqual(accuracy_from_path, accuracy_from_pd)
+
+  def test_hp_dictionary(self):
+    learner = specialized_learners.RandomForestLearner(label="l", num_trees=50)
+    self.assertDictContainsSubset(
+        {
+            "num_trees": 50,
+            "categorical_algorithm": "CART",
+            "categorical_set_split_greedy_sampling": 0.1,
+            "compute_oob_performances": True,
+            "compute_oob_variable_importances": False,
+        },
+        learner.hyperparameters,
+    )
+
 
 class CARTLearnerTest(LearnerTest):
 
@@ -403,7 +437,7 @@ class CARTLearnerTest(LearnerTest):
     )
     ds = pd.DataFrame({"feature": [0, 1], "label": [0, 1]})
     with self.assertRaisesRegex(
-        status.StatusNotOk,
+        test_utils.AbslInvalidArgumentError,
         "The learner CART does not support monotonic constraints",
     ):
       _ = learner.train(ds)
@@ -425,8 +459,7 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
 
     self._check_adult_model(learner=learner, ds=ds, minimum_accuracy=0.869)
 
-  # TODO: Enable when HASH columns are supporterd.
-  def disabled_test_toy_ranking(self):
+  def test_toy_ranking(self):
     learner = specialized_learners.GradientBoostedTreesLearner(
         label="col2",
         ranking_group="col1",
@@ -444,7 +477,7 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
     )
     ds = pd.DataFrame({"feature": [0, 1], "label": [0, 1]})
     with self.assertRaisesRegex(
-        status.StatusNotOk,
+        test_utils.AbslInvalidArgumentError,
         "Gradient Boosted Trees does not support monotonic constraints with"
         " use_hessian_gain=false",
     ):
@@ -517,38 +550,68 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
     logging.info("evaluation:\n%s", evaluation)
     self.assertAlmostEqual(evaluation.accuracy, 0.87, 1)
 
-  def test_adult_from_csv(self):
-    dataset_directory = os.path.join(test_utils.ydf_test_data_path(), "dataset")
-    train_path = os.path.join(dataset_directory, "adult_train.csv")
-    test_path = os.path.join(dataset_directory, "adult_test.csv")
-    label = "income"
+  def test_resume_training(self):
+    ds = adult_dataset()
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label=ds.label,
+        num_trees=10,
+        resume_training=True,
+        working_dir=self.create_tempdir().full_path,
+    )
+    model_1 = learner.train(ds.train)
+    assert isinstance(model_1, decision_forest_model.DecisionForestModel)
+    self.assertEqual(model_1.num_trees(), 10)
+    learner.hyperparameters["num_trees"] = 50
+    model_2 = learner.train(ds.train)
+    assert isinstance(model_2, decision_forest_model.DecisionForestModel)
+    self.assertEqual(model_2.num_trees(), 50)
 
-    learner = specialized_learners.RandomForestLearner(label=label)
+  def test_ranking(self):
+    dataset_directory = os.path.join(test_utils.ydf_test_data_path(), "dataset")
+    train_path = os.path.join(dataset_directory, "synthetic_ranking_train.csv")
+    test_path = os.path.join(dataset_directory, "synthetic_ranking_test.csv")
+    train_ds = pd.read_csv(train_path)
+    test_ds = pd.read_csv(test_path)
+    label = "LABEL"
+    ranking_group = "GROUP"
+
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label=label,
+        ranking_group=ranking_group,
+        task=generic_learner.Task.RANKING,
+    )
+
+    model = learner.train(train_ds)
+    evaluation = model.evaluate(test_ds)
+    self.assertAlmostEqual(evaluation.ndcg, 0.71, places=1)
+
+  def test_ranking_path(self):
+    dataset_directory = os.path.join(test_utils.ydf_test_data_path(), "dataset")
+    train_path = os.path.join(dataset_directory, "synthetic_ranking_train.csv")
+    test_path = os.path.join(dataset_directory, "synthetic_ranking_test.csv")
+    label = "LABEL"
+    ranking_group = "GROUP"
+
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label=label,
+        ranking_group=ranking_group,
+        task=generic_learner.Task.RANKING,
+    )
 
     model = learner.train(train_path)
-    accuracy = model.evaluate(test_path).accuracy
-    self.assertGreaterEqual(accuracy, 0.864)
+    evaluation = model.evaluate(test_path)
+    self.assertAlmostEqual(evaluation.ndcg, 0.71, places=1)
 
-  def test_compare_pandas_and_path(self):
-    dataset_directory = os.path.join(test_utils.ydf_test_data_path(), "dataset")
-    train_path = os.path.join(dataset_directory, "adult_train.csv")
-    test_path = os.path.join(dataset_directory, "adult_test.csv")
-    label = "income"
 
-    pd_train = pd.read_csv(train_path)
-    pd_test = pd.read_csv(test_path)
+class LoggingTest(parameterized.TestCase):
 
-    learner = specialized_learners.RandomForestLearner(label=label)
-    model_from_pd = learner.train(pd_train)
-    accuracy_from_pd = model_from_pd.evaluate(pd_test).accuracy
-
-    learner_from_path = specialized_learners.RandomForestLearner(
-        label=label, data_spec=model_from_pd.data_spec()
-    )
-    model_from_path = learner_from_path.train(train_path)
-    accuracy_from_path = model_from_path.evaluate(pd_test).accuracy
-
-    self.assertAlmostEqual(accuracy_from_path, accuracy_from_pd)
+  @parameterized.parameters(0, 1, 2)
+  def test_logging(self, verbose):
+    save_verbose = log.verbose(verbose)
+    learner = specialized_learners.RandomForestLearner(label="label")
+    ds = pd.DataFrame({"feature": [0, 1], "label": [0, 1]})
+    _ = learner.train(ds)
+    log.verbose(save_verbose)
 
 
 class UtilityTest(LearnerTest):

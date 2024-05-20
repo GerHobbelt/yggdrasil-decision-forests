@@ -21,7 +21,7 @@ import setuptools
 from setuptools.command.install import install
 from setuptools.dist import Distribution
 
-_VERSION = "0.0.3"
+_VERSION = "0.0.4"
 
 with open("README.md", "r", encoding="utf-8") as fh:
   long_description = fh.read()
@@ -32,7 +32,7 @@ REQUIRED_PACKAGES = [
     "protobuf>=3.14",
 ]
 
-OPTIONAL_PACKAGES = {"pandas": ["pandas"], "matplotlib": ["matplotlib"]}
+OPTIONAL_PACKAGES = {"pandas": ["pandas"]}
 
 
 class InstallPlatlib(install):

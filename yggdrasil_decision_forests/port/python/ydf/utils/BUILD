@@ -1,4 +1,5 @@
 # pytype test and library
+load("@pybind11_bazel//:build_defs.bzl", "pybind_library")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -27,12 +28,34 @@ py_library(
     name = "test_utils",
     testonly = True,
     srcs = ["test_utils.py"],
-    data = [
+    deps = [
         # absl/flags dep,
         # absl/testing:absltest dep,
-        "@com_google_pybind11_abseil//pybind11_abseil:status.so",
     ],
+)
+
+py_library(
+    name = "log",
+    srcs = ["log.py"],
     deps = [
+        # absl/logging dep,
+        "//ydf/cc:ydf",
+    ],
+)
+
+pybind_library(
+    name = "log_cc",
+    srcs = ["log.cc"],
+    hdrs = ["log.h"],
+    deps = ["@ydf_cc//yggdrasil_decision_forests/utils:logging"],
+)
+
+pybind_library(
+    name = "status_casters",
+    hdrs = ["status_casters.h"],
+    deps = [
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
     ],
 )
 

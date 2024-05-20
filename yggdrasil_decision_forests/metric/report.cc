@@ -194,6 +194,11 @@ void PlotConditionalVariables(const std::vector<float>& var_1,
 absl::Status AppendHtmlReportRegression(const proto::EvaluationResults& eval,
                                         const HtmlReportOptions& options,
                                         utils::html::Html* html) {
+  if (eval.sampled_predictions_size() == 0) {
+    html->Append(utils::html::P("No predictions"));
+    return absl::OkStatus();
+  }
+
   utils::plot::MultiPlot multiplot;
   ASSIGN_OR_RETURN(auto placer,
                    utils::plot::PlotPlacer::Create(
@@ -402,7 +407,8 @@ absl::Status AppendTextReportClassification(
     absl::StrAppend(report, "Confusion Table:\n");
     utils::IntegersConfusionMatrixDouble confusion;
     confusion.Load(eval.classification().confusion());
-    RETURN_IF_ERROR(confusion.AppendTextReport(eval.label_column(), report));
+    RETURN_IF_ERROR(
+        confusion.AppendTextReport(eval.label_column(), report, 1, 1));
     absl::StrAppend(report, "\n");
   }
 
@@ -442,7 +448,6 @@ absl::Status AppendTextReportClassification(
         }
       };
 
-  absl::StrAppend(report, "One vs other classes:\n");
   for (int roc_idx = 0; roc_idx < eval.classification().rocs_size();
        roc_idx++) {
     const auto& roc = eval.classification().rocs(roc_idx);

@@ -39,7 +39,6 @@
 #include "absl/strings/substitute.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
-#include "pybind11_abseil/status_casters.h"  // IWYU pargma : keep
 #include "pybind11_protobuf/native_proto_caster.h"  // IWYU pargma : keep
 #include "yggdrasil_decision_forests/dataset/data_spec.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
@@ -47,6 +46,7 @@
 #include "yggdrasil_decision_forests/dataset/formats.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset_io.h"
+#include "ydf/utils/status_casters.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
 
@@ -66,6 +66,8 @@ using BooleanColumn =
     ::yggdrasil_decision_forests::dataset::VerticalDataset::BooleanColumn;
 using CategoricalColumn =
     ::yggdrasil_decision_forests::dataset::VerticalDataset::CategoricalColumn;
+using HashColumn =
+    ::yggdrasil_decision_forests::dataset::VerticalDataset::HashColumn;
 
 // Checks if all columns of the dataset have the same number of rows and sets
 // the dataset's number of rows accordingly. If requested, also modifies the
@@ -540,6 +542,52 @@ absl::Status PopulateColumnCategoricalNPBytes(
   return absl::OkStatus();
 }
 
+// Append contents of `data` to a HASH column. If no `column_idx` is not
+// given, a new column is created.
+//
+// Note that this function only creates the columns and copies the data, but it
+// does not set `num_rows` on the dataset. Before using the dataset, `num_rows
+// has to be set (e.g. using SetAndCheckNumRows).
+absl::Status PopulateColumnHashNPBytes(dataset::VerticalDataset& self,
+                                       const std::string& name, py::array& data,
+                                       std::optional<int> column_idx) {
+  ASSIGN_OR_RETURN(const auto values, NPByteArray::Create(data));
+
+  HashColumn* column;
+  size_t offset = 0;
+  if (!column_idx.has_value()) {
+    // Create column spec
+    dataset::proto::Column column_spec;
+    column_spec.set_name(name);
+    column_spec.set_type(dataset::proto::ColumnType::HASH);
+
+    // Import column data
+    ASSIGN_OR_RETURN(auto* abstract_column, self.AddColumn(column_spec));
+    ASSIGN_OR_RETURN(column,
+                     abstract_column->MutableCastWithStatus<HashColumn>());
+    column_idx = self.ncol() - 1;
+  } else {
+    ASSIGN_OR_RETURN(column, self.MutableColumnWithCastWithStatus<HashColumn>(
+                                 column_idx.value()));
+    offset = column->values().size();
+  }
+  column->Resize(offset + values.size());
+  auto& dst_values = *column->mutable_values();
+
+  for (size_t value_idx = 0; value_idx < values.size(); value_idx++) {
+    const auto value = values[value_idx];
+    uint64_t dst_value;
+    if (value.empty()) {
+      dst_value = dataset::VerticalDataset::HashColumn::kNaValue;
+    } else {
+      dst_value = dataset::HashColumnString(value);
+    }
+    dst_values[offset + value_idx] = dst_value;
+  }
+
+  return absl::OkStatus();
+}
+
 absl::Status CreateColumnsFromDataSpec(
     dataset::VerticalDataset& self,
     const dataset::proto::DataSpecification& data_spec) {
@@ -612,6 +660,7 @@ void init_dataset(py::module_& m) {
   py::class_<dataset::VerticalDataset>(m, "VerticalDataset")
       .def(py::init<>())
       .def("data_spec", &dataset::VerticalDataset::data_spec)
+      .def("nrow", &dataset::VerticalDataset::nrow)
       .def("MemoryUsage", &dataset::VerticalDataset::MemoryUsage)
       .def("__repr__",
            [](const dataset::VerticalDataset& a) {
@@ -623,32 +672,39 @@ void init_dataset(py::module_& m) {
       .def("DebugString", &DebugString,
            "Converts a dataset's contents to a CSV-like string. To be used for "
            "debugging / testing only.")
-      .def("CreateFromPathWithDataSpec", &CreateFromPathWithDataSpec,
-           py::arg("path"), py::arg("data_spec"),
+      .def("CreateFromPathWithDataSpec",
+           WithStatus(CreateFromPathWithDataSpec), py::arg("path"),
+           py::arg("data_spec"),
            "Creates a dataset from a path, supports sharding. If the path is "
            "typed, use the type, the given type is used. Otherwise, YDF will "
            "try to determine the path and fail if this is not possible.")
-      .def("CreateFromPathWithDataSpecGuide", &CreateFromPathWithDataSpecGuide,
+      .def("CreateFromPathWithDataSpecGuide",
+           WithStatus(CreateFromPathWithDataSpecGuide),
            py::arg("path"), py::arg("data_spec_guide"),
            "Creates a dataset from a path, supports sharding. If the path is "
            "typed, use the type, the given type is used. Otherwise, YDF will "
            "try to determine the path and fail if this is not possible.")
-      .def("CreateColumnsFromDataSpec", &CreateColumnsFromDataSpec,
-           py::arg("data_spec"))
-      .def("SetAndCheckNumRows", &SetAndCheckNumRows, py::arg("set_data_spec"))
+      .def("CreateColumnsFromDataSpec",
+           WithStatus(CreateColumnsFromDataSpec), py::arg("data_spec"))
+      .def("SetAndCheckNumRows", WithStatus(SetAndCheckNumRows),
+           py::arg("set_data_spec"))
       // Data setters
       .def("PopulateColumnCategoricalNPBytes",
-           &PopulateColumnCategoricalNPBytes, py::arg("name"),
-           py::arg("data").noconvert(), py::arg("max_vocab_count") = -1,
-           py::arg("min_vocab_frequency") = -1,
+           WithStatus(PopulateColumnCategoricalNPBytes),
+           py::arg("name"), py::arg("data").noconvert(),
+           py::arg("max_vocab_count") = -1, py::arg("min_vocab_frequency") = -1,
            py::arg("column_idx") = std::nullopt,
            py::arg("dictionary") = std::nullopt)
       .def("PopulateColumnNumericalNPFloat32",
-           &PopulateColumnNumericalNPFloat32, py::arg("name"),
-           py::arg("data").noconvert(), py::arg("column_idx") = std::nullopt)
-      .def("PopulateColumnBooleanNPBool", &PopulateColumnBooleanNPBool,
+           WithStatus(PopulateColumnNumericalNPFloat32),
            py::arg("name"), py::arg("data").noconvert(),
-           py::arg("column_idx") = std::nullopt);
+           py::arg("column_idx") = std::nullopt)
+      .def("PopulateColumnBooleanNPBool",
+           WithStatus(PopulateColumnBooleanNPBool), py::arg("name"),
+           py::arg("data").noconvert(), py::arg("column_idx") = std::nullopt)
+      .def("PopulateColumnHashNPBytes",
+           WithStatus(PopulateColumnHashNPBytes), py::arg("name"),
+           py::arg("data").noconvert(), py::arg("column_idx") = std::nullopt);
 }
 
 }  // namespace yggdrasil_decision_forests::port::python
