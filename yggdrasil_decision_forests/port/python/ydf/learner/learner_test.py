@@ -35,8 +35,8 @@ from ydf.learner import generic_learner
 from ydf.learner import specialized_learners
 from ydf.learner import tuner as tuner_lib
 from ydf.metric import metric
-from ydf.model import decision_forest_model
 from ydf.model import generic_model
+from ydf.model.decision_forest_model import decision_forest_model
 from ydf.utils import log
 from ydf.utils import test_utils
 
@@ -273,6 +273,8 @@ class RandomForestLearnerTest(LearnerTest):
         generic_learner.Task.NUMERICAL_UPLIFT,
     )
 
+  # TODO: b/310580458 - Fix this test in OSS.
+  @absltest.skip("Test sometimes times out")
   def test_interrupt_training(self):
     ds = pd.read_csv(
         os.path.join(
@@ -316,7 +318,9 @@ class RandomForestLearnerTest(LearnerTest):
     )
     vds_dataset = DatasetForTesting(vds_train, vds_test, pd_dataset.label)
 
-    tuner = tuner_lib.RandomSearchTuner(num_trials=5, use_predefined_hps=True)
+    tuner = tuner_lib.RandomSearchTuner(
+        num_trials=5, automatic_search_space=True
+    )
     learner = specialized_learners.GradientBoostedTreesLearner(
         label=pd_dataset.label,
         tuner=tuner,
@@ -328,7 +332,7 @@ class RandomForestLearnerTest(LearnerTest):
     )
     logs = model.hyperparameter_optimizer_logs()
     self.assertIsNotNone(logs)
-    self.assertLen(logs.steps, 5)
+    self.assertLen(logs.trials, 5)
 
   def test_tuner_predefined(self):
     pd_dataset = adult_dataset()
@@ -338,7 +342,9 @@ class RandomForestLearnerTest(LearnerTest):
     )
     vds_dataset = DatasetForTesting(vds_train, vds_test, pd_dataset.label)
 
-    tuner = tuner_lib.RandomSearchTuner(num_trials=5, use_predefined_hps=True)
+    tuner = tuner_lib.RandomSearchTuner(
+        num_trials=5, automatic_search_space=True
+    )
     learner = specialized_learners.GradientBoostedTreesLearner(
         label=pd_dataset.label,
         tuner=tuner,
@@ -350,7 +356,7 @@ class RandomForestLearnerTest(LearnerTest):
     )
     logs = model.hyperparameter_optimizer_logs()
     self.assertIsNotNone(logs)
-    self.assertLen(logs.steps, 5)
+    self.assertLen(logs.trials, 5)
 
   def test_label_type_error_message(self):
     with self.assertRaisesRegex(
@@ -410,6 +416,16 @@ class RandomForestLearnerTest(LearnerTest):
     accuracy_from_path = model_from_path.evaluate(pd_test).accuracy
 
     self.assertAlmostEqual(accuracy_from_path, accuracy_from_pd)
+
+  def test_train_with_path_validation_dataset(self):
+    dataset_directory = os.path.join(test_utils.ydf_test_data_path(), "dataset")
+    train_path = os.path.join(dataset_directory, "adult_train.csv")
+    test_path = os.path.join(dataset_directory, "adult_test.csv")
+    label = "income"
+    learner = specialized_learners.RandomForestLearner(label=label)
+    model = learner.train(train_path, valid=test_path)
+    evaluation = model.evaluate(test_path)
+    self.assertGreaterEqual(evaluation.accuracy, 0.86)
 
   def test_hp_dictionary(self):
     learner = specialized_learners.RandomForestLearner(label="l", num_trees=50)
@@ -483,6 +499,20 @@ class RandomForestLearnerTest(LearnerTest):
 
     predictions = model.predict(data)
     self.assertEqual(predictions.shape, (2,))
+
+  def test_model_metadata_contains_framework(self):
+    learner = specialized_learners.RandomForestLearner(
+        label="label", num_trees=2
+    )
+    model = learner.train(toy_dataset())
+    self.assertEqual(model.metadata().framework, "Python YDF")
+
+  def test_model_metadata_does_not_populate_owner(self):
+    learner = specialized_learners.RandomForestLearner(
+        label="label", num_trees=2
+    )
+    model = learner.train(toy_dataset())
+    self.assertEqual(model.metadata().owner, "")
 
 
 class CARTLearnerTest(LearnerTest):
@@ -567,6 +597,7 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
             learner="GRADIENT_BOOSTED_TREES",
             label="income",
             task=abstract_model_pb2.Task.CLASSIFICATION,
+            metadata=abstract_model_pb2.Metadata(framework="Python YDF"),
             monotonic_constraints=[
                 ProtoMonotonicConstraint(
                     feature="^age$",

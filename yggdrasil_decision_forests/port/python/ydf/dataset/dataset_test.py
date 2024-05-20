@@ -703,6 +703,59 @@ B,3""")
     )
     self.assertEqual(ds.data_spec(), expected_data_spec)
 
+  def test_read_from_sharded_tfe_nocompress(self):
+    sharded_path = "tfrecordv2+tfe:" + os.path.join(
+        test_utils.ydf_test_data_path(),
+        "dataset",
+        "toy.nocompress-tfe-tfrecord@2",
+    )
+    ds = dataset.create_vertical_dataset(
+        sharded_path,
+        min_vocab_frequency=1,
+        columns=["Bool_1", "Cat_2", "Num_1"],
+    )
+    expected_data_spec = ds_pb.DataSpecification(
+        columns=(
+            ds_pb.Column(
+                name="Bool_1",
+                type=ds_pb.BOOLEAN,
+                is_manual_type=False,
+                boolean=ds_pb.BooleanSpec(count_true=2, count_false=2),
+            ),
+            ds_pb.Column(
+                name="Cat_2",
+                type=ds_pb.CATEGORICAL,
+                is_manual_type=False,
+                categorical=ds_pb.CategoricalSpec(
+                    number_of_unique_values=3,
+                    most_frequent_value=1,
+                    min_value_count=1,
+                    max_number_of_unique_values=2000,
+                    is_already_integerized=False,
+                    items={
+                        "<OOD>": VocabValue(index=0, count=0),
+                        "A": VocabValue(index=2, count=1),
+                        "B": VocabValue(index=1, count=1),
+                    },
+                ),
+                count_nas=2,
+            ),
+            ds_pb.Column(
+                name="Num_1",
+                type=ds_pb.NUMERICAL,
+                is_manual_type=False,
+                numerical=ds_pb.NumericalSpec(
+                    mean=2.5,
+                    min_value=1.0,
+                    max_value=4.0,
+                    standard_deviation=1.118033988749895,
+                ),
+            ),
+        ),
+        created_num_rows=4,
+    )
+    self.assertEqual(ds.data_spec(), expected_data_spec)
+
   def test_multidimensional_input(self):
     ds = dataset.create_vertical_dataset(
         {"feature": np.array([[0, 1, 2], [4, 5, 6]])}
@@ -766,6 +819,119 @@ B,3""")
         ValueError, "Input features can only be one or two dimensional"
     ):
       _ = dataset.create_vertical_dataset({"feature": np.zeros((3, 3, 3))})
+
+  def test_list_of_csv_datasets(self):
+    df = pd.DataFrame({
+        "col_str": ["A", "string", "column with", "four entries"],
+        "col_int": [5, 6, 7, 8],
+        "col_int_cat": [1, 2, 3, 4],
+        "col_float": [1.1, 2.2, 3.3, 4.4],
+    })
+    feature_definitions = [
+        Column("col_str", Semantic.CATEGORICAL, min_vocab_frequency=1),
+        Column("col_int_cat", Semantic.CATEGORICAL, min_vocab_frequency=1),
+    ]
+    dataset_directory = self.create_tempdir()
+    path1 = os.path.join(dataset_directory.full_path, "ds1")
+    path2 = os.path.join(dataset_directory.full_path, "ds2")
+    df.head(3).to_csv(path1, index=False)
+    df.tail(1).to_csv(path2, index=False)
+
+    ds = dataset.create_vertical_dataset(
+        ["csv:" + path1, "csv:" + path2],
+        columns=feature_definitions,
+        include_all_columns=True,
+    )
+
+    expected_dataset_content = """\
+col_str,col_int,col_int_cat,col_float
+A,5,1,1.1
+string,6,2,2.2
+column with,7,3,3.3
+four entries,8,4,4.4
+"""
+    self.assertEqual(expected_dataset_content, ds._dataset.DebugString())
+
+  def test_singledimensional_strided(self):
+    data = np.array([[0, 1], [4, 5]], np.float32)
+    feature = data[:, 0]  # "feature" shares the same memory as "data".
+    self.assertEqual(data.strides, (8, 4))
+    self.assertEqual(feature.strides, (8,))
+
+    ds = dataset.create_vertical_dataset({"feature": feature})
+    expected_data_spec = ds_pb.DataSpecification(
+        created_num_rows=2,
+        columns=(
+            ds_pb.Column(
+                name="feature",
+                type=ds_pb.ColumnType.NUMERICAL,
+                count_nas=0,
+                numerical=ds_pb.NumericalSpec(
+                    mean=2,
+                    standard_deviation=2,
+                    min_value=0,
+                    max_value=4,
+                ),
+            ),
+        ),
+    )
+    test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
+
+    expected_dataset_content = "feature\n0\n4\n"
+    self.assertEqual(expected_dataset_content, ds._dataset.DebugString())
+
+  def test_multidimensional_strided(self):
+    # Note: multidimensional features are unrolled into singledimensional
+    # strided features.
+    ds = dataset.create_vertical_dataset(
+        {"feature": np.array([[0, 1, 2], [4, 5, 6]], np.float32)}
+    )
+    expected_data_spec = ds_pb.DataSpecification(
+        created_num_rows=2,
+        columns=(
+            ds_pb.Column(
+                name="feature.0_of_3",
+                type=ds_pb.ColumnType.NUMERICAL,
+                count_nas=0,
+                numerical=ds_pb.NumericalSpec(
+                    mean=2,
+                    standard_deviation=2,
+                    min_value=0,
+                    max_value=4,
+                ),
+            ),
+            ds_pb.Column(
+                name="feature.1_of_3",
+                type=ds_pb.ColumnType.NUMERICAL,
+                count_nas=0,
+                numerical=ds_pb.NumericalSpec(
+                    mean=3,
+                    standard_deviation=2,
+                    min_value=1,
+                    max_value=5,
+                ),
+            ),
+            ds_pb.Column(
+                name="feature.2_of_3",
+                type=ds_pb.ColumnType.NUMERICAL,
+                count_nas=0,
+                numerical=ds_pb.NumericalSpec(
+                    mean=4,
+                    standard_deviation=2,
+                    min_value=2,
+                    max_value=6,
+                ),
+            ),
+        ),
+    )
+    test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
+
+    expected_dataset_content = """\
+feature.0_of_3,feature.1_of_3,feature.2_of_3
+0,1,2
+4,5,6
+"""
+    self.assertEqual(expected_dataset_content, ds._dataset.DebugString())
 
 
 if __name__ == "__main__":

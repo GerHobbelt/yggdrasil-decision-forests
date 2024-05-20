@@ -1,5 +1,5 @@
 # Learner bindings for PYDF
-# pytype test and library
+# pytype binary, test, library
 load("@pybind11_bazel//:build_defs.bzl", "pybind_library")
 load("//ydf/learner/wrapper:wrapper_generator.bzl", "py_wrap_yggdrasil_learners")
 load("@ydf_cc//yggdrasil_decision_forests/utils:compile.bzl", "cc_library_ydf")
@@ -7,6 +7,21 @@ load("@ydf_cc//yggdrasil_decision_forests/utils:compile.bzl", "cc_library_ydf")
 package(
     default_visibility = ["//visibility:public"],
     licenses = ["notice"],
+)
+
+# Binary
+# =========
+
+py_binary(
+    name = "worker_main",
+    srcs = ["worker_main.py"],
+    python_version = "PY3",
+    deps = [
+        # absl:app dep,
+        # absl/flags dep,
+        # absl/logging dep,
+        # ydf dep,
+    ],
 )
 
 # Libraries
@@ -25,6 +40,16 @@ cc_library_ydf(
     alwayslink = 1,
 )
 
+cc_library_ydf(
+    name = "canonical_workers",
+    deps = [
+        "@ydf_cc//yggdrasil_decision_forests/learner/distributed_decision_tree/dataset_cache:dataset_cache_worker",
+        "@ydf_cc//yggdrasil_decision_forests/learner/distributed_gradient_boosted_trees:worker",
+        "@ydf_cc//yggdrasil_decision_forests/learner/generic_worker",
+    ],
+    alwayslink = 1,
+)
+
 py_wrap_yggdrasil_learners(
     name = "specialized_learners",
     learner_deps = [":canonical_learners"],
@@ -36,6 +61,7 @@ pybind_library(
     hdrs = ["learner.h"],
     deps = [
         ":canonical_learners",
+        "//ydf/model:model_cc",
         "//ydf/model:model_wrapper",
         "//ydf/utils:status_casters",
         "@com_google_absl//absl/status",
@@ -129,14 +155,12 @@ pybind_library(
     srcs = ["worker.cc"],
     hdrs = ["worker.h"],
     deps = [
+        ":canonical_workers",
         "//ydf/utils:status_casters",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@ydf_cc//yggdrasil_decision_forests/learner/distributed_decision_tree/dataset_cache:dataset_cache_worker",
-        "@ydf_cc//yggdrasil_decision_forests/learner/distributed_gradient_boosted_trees:worker",
-        "@ydf_cc//yggdrasil_decision_forests/learner/generic_worker",
         "@ydf_cc//yggdrasil_decision_forests/utils:concurrency",
         "@ydf_cc//yggdrasil_decision_forests/utils:logging",
         "@ydf_cc//yggdrasil_decision_forests/utils:uid",
@@ -150,6 +174,7 @@ pybind_library(
 
 py_test(
     name = "learner_test",
+    size = "large",
     srcs = ["learner_test.py"],
     data = ["@ydf_cc//yggdrasil_decision_forests/test_data"],
     python_version = "PY3",
@@ -169,8 +194,8 @@ py_test(
         "//ydf/dataset",
         "//ydf/dataset:dataspec",
         "//ydf/metric",
-        "//ydf/model:decision_forest_model",
         "//ydf/model:generic_model",
+        "//ydf/model/decision_forest_model",
         "//ydf/utils:log",
         "//ydf/utils:test_utils",
     ],
@@ -198,8 +223,8 @@ py_test(
         "//ydf/dataset",
         "//ydf/dataset:dataspec",
         "//ydf/metric",
-        "//ydf/model:decision_forest_model",
         "//ydf/model:generic_model",
+        "//ydf/model/decision_forest_model",
         "//ydf/utils:log",
         "//ydf/utils:test_utils",
     ],

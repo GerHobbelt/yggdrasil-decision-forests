@@ -15,6 +15,7 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         ":version",
+        # tensorflow_decision_forests dep,  # buildcleaner: keep
         "//ydf/dataset",
         "//ydf/dataset:dataspec",
         "//ydf/learner:generic_learner",
@@ -22,11 +23,11 @@ py_library(
         "//ydf/learner:tuner",
         "//ydf/learner:worker",
         "//ydf/model:generic_model",
-        "//ydf/model:gradient_boosted_trees_model",
         "//ydf/model:model_lib",
-        "//ydf/model:random_forest_model",
+        "//ydf/model:model_metadata",
+        "//ydf/model/gradient_boosted_trees_model",
+        "//ydf/model/random_forest_model",
         "//ydf/utils:log",
-        "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_py_proto",
     ],
 )
 

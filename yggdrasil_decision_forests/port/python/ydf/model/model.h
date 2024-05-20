@@ -18,7 +18,15 @@
 
 #include <pybind11/pybind11.h>
 
+#include <memory>
+
+#include "yggdrasil_decision_forests/model/abstract_model.h"
+#include "ydf/model/model_wrapper.h"
+
 namespace yggdrasil_decision_forests::port::python {
+
+std::unique_ptr<GenericCCModel> CreateCCModel(
+    std::unique_ptr<model::AbstractModel> model_ptr);
 
 void init_model(pybind11::module_ &m);
 

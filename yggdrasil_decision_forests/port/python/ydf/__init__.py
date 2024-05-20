@@ -32,8 +32,9 @@ from ydf.model.model_lib import load_model
 from ydf.model.generic_model import Task
 from ydf.model.generic_model import ModelIOOptions
 from ydf.model.generic_model import GenericModel
-from ydf.model.random_forest_model import RandomForestModel
-from ydf.model.gradient_boosted_trees_model import GradientBoostedTreesModel
+from ydf.model.random_forest_model.random_forest_model import RandomForestModel
+from ydf.model.gradient_boosted_trees_model.gradient_boosted_trees_model import GradientBoostedTreesModel
+from ydf.model.model_metadata import ModelMetadata
 
 # Learner
 from ydf.learner.generic_learner import GenericLearner
@@ -50,5 +51,6 @@ from ydf.learner.tuner import RandomSearchTuner
 
 # Logs
 from ydf.utils.log import verbose
+from ydf.utils.log import strict
 
 # pylint: enable=g-importing-member,g-import-not-at-top,g-bad-import-order,reimported
