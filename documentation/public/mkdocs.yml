@@ -1,6 +1,6 @@
-site_name: Yggdrasil Decision Forests' documentation
+site_name: YDF documentation
 site_url: https://ydf.readthedocs.io/
-site_description: "Yggdrasil Decision Forests (YDF) is a library to train, evaluate, interpret, and productionize decision forest models such as Random Forest and Gradient Boosted Decision Trees. YDF is available in Python, C++, CLI, JavaScript and Go."
+site_description: "YDF (short for Yggdrasil Decision Forests) is a library to train, evaluate, interpret, and productionize decision forest models such as Random Forest and Gradient Boosted Decision Trees. YDF is available in Python, C++, CLI, JavaScript and Go."
 repo_url: https://github.com/google/yggdrasil-decision-forests
 repo_name: google/yggdrasil-decision-forests
 
@@ -20,7 +20,9 @@ theme:
     - navigation.indexes
     - search.suggest
 
-  palette: 
+  palette:
+    - primary: white
+    - accent: blue
     - scheme: default
       toggle:
         icon: material/weather-night
@@ -32,17 +34,18 @@ theme:
 
 extra_css:
   - style/extra.css
+  - https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined
 
 strict: false # TODO: Set to true before release.
 
 nav:
-  - Home: index.md
-  - 'Getting Started 🧭': tutorial/getting_started.ipynb
-  - Hyper-parameters 🔥: hyperparameters.md
-  - API Reference 🐜: py_api/index.md
-  - FAQ 🗨️: faq.md
-  - Glossary 📙: glossary.md
-  - For Googlers: http://go/ydf
+  - 🏡 Home: index.md
+  - 🧭 Getting Started: tutorial/getting_started.ipynb
+  - 🔥 Hyper-parameters: hyperparameters.md
+  - 🐜 API: py_api/index.md
+  - ❔ FAQ: faq.md
+  - 📖 Glossary: glossary.md
+  - 🤸 For Googlers: http://go/ydf
   - Guides:
     - What are decision forests?: https://developers.google.com/machine-learning/decision-forests
     - Improve model quality: guide_how_to_improve_model.md
@@ -61,10 +64,12 @@ nav:
     - time sequences: tutorial/time_sequences.ipynb
     - multi-dimensional:  tutorial/multidimensional_feature.ipynb
     # TODO: boolean, and text
+  - Deep learning:
+    - with TensorFlow: tutorial/compose_with_tf.ipynb
   - Dataset:
-    - Pandas: tutorial/pandas.ipynb
-    - tf.data.Dataset: tutorial/tf_dataset.ipynb
-    # TODO: Add Dictionary, CSV, TF Dataset, TFRecord
+    - Pandas Dataframe: tutorial/pandas.ipynb
+    - TensorFlow Dataset: tutorial/tf_dataset.ipynb
+    # TODO: Add Dictionary, CSV, TFRecord
   - Modeling:
     - Tuning: tutorial/tuning.ipynb
     - Distributed training: tutorial/distributed_training.ipynb
@@ -86,12 +91,14 @@ nav:
   #  - example distance: tutorial/example_distance.ipynb
     # TODO: model inspection, manual tree creation, custom loss.
   - Other APIs:
-    - TensorFlow Decision Forests 🔗: https://www.tensorflow.org/decision_forests
+    - TensorFlow Decision Forests: https://www.tensorflow.org/decision_forests
     - CLI quickstart: cli_quickstart.md
     - CLI & C++ user manual: cli_user_manual.md
     - CLI commands: cli_commands.md
     - CLI examples: https://github.com/google/yggdrasil-decision-forests/tree/main/examples
     - C++ examples: https://github.com/google/yggdrasil-decision-forests/tree/main/examples/standalone
+    - Go: https://github.com/google/yggdrasil-decision-forests/tree/main/yggdrasil_decision_forests/port/go
+    - JavaScript: https://github.com/google/yggdrasil-decision-forests/tree/main/yggdrasil_decision_forests/port/javascript
   - Changelog: changelog.md
   - Long-time support: lts.md
   - Contact: contact.md
@@ -151,7 +158,7 @@ plugins:
             show_docstring_attributes: true
             allow_inspection: true
             show_root_full_path: false
-            docstring_section_style: list
+            docstring_section_style: table
             signature_crossrefs: true
             show_signature: true
             separate_signature: true

@@ -28,6 +28,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -166,19 +167,23 @@ absl::StatusOr<dataset::proto::Column> CreateNumericalColumnSpec(
 // Note that this function only creates the columns and copies the data, but it
 // does not set `num_rows` on the dataset. Before using the dataset, `num_rows
 // has to be set (e.g. using SetAndCheckNumRows).
-absl::Status PopulateColumnNumericalNPFloat32(dataset::VerticalDataset& self,
-                                              const std::string& name,
-                                              py::array_t<float>& data,
-                                              std::optional<int> column_idx) {
+absl::Status PopulateColumnNumericalNPFloat32(
+    dataset::VerticalDataset& self, const std::string& name,
+    py::array_t<float>& data, std::optional<dataset::proto::DType> ydf_dtype,
+    std::optional<int> column_idx) {
   StridedSpanFloat32 src_values(data);
 
   const auto get_mutable_column =
-      [column_idx, &self, &name,
-       &src_values]() -> absl::StatusOr<NumericalColumn* const> {
+      [column_idx, &self, &name, &src_values,
+       &ydf_dtype]() -> absl::StatusOr<NumericalColumn* const> {
     if (!column_idx.has_value()) {
       // Create column spec
-      ASSIGN_OR_RETURN(const auto column_spec,
+      ASSIGN_OR_RETURN(auto column_spec,
                        CreateNumericalColumnSpec(name, src_values));
+      if (ydf_dtype.has_value()) {
+        column_spec.set_dtype(*ydf_dtype);
+      }
+
       ASSIGN_OR_RETURN(auto* abstract_column, self.AddColumn(column_spec));
       // Import column data
       return abstract_column->MutableCastWithStatus<NumericalColumn>();
@@ -190,6 +195,7 @@ absl::Status PopulateColumnNumericalNPFloat32(dataset::VerticalDataset& self,
     }
   };
   ASSIGN_OR_RETURN(NumericalColumn* const column, get_mutable_column());
+
   std::vector<float>& dst_values = *column->mutable_values();
   const size_t offset = dst_values.size();
   dst_values.resize(offset + src_values.size());
@@ -202,14 +208,14 @@ absl::Status PopulateColumnNumericalNPFloat32(dataset::VerticalDataset& self,
 
 // Creates a column spec for a boolean column.
 absl::StatusOr<dataset::proto::Column> CreateBooleanColumnSpec(
-    const std::string& name, absl::Span<const bool> values) {
+    const std::string& name, const StridedSpan<bool> values) {
   // Note: A span of bool cannot represent missing values.
   const size_t num_valid_values = values.size();
   size_t count_true = 0;
   size_t count_false = 0;
 
-  for (const bool value : values) {
-    if (value) {
+  for (size_t value_idx = 0; value_idx < values.size(); value_idx++) {
+    if (values[value_idx]) {
       count_true++;
     } else {
       count_false++;
@@ -233,34 +239,35 @@ absl::StatusOr<dataset::proto::Column> CreateBooleanColumnSpec(
 // Note that this function only creates the columns and copies the data, but it
 // does not set `num_rows` on the dataset. Before using the dataset, `num_rows
 // has to be set (e.g. using SetAndCheckNumRows).
-absl::Status PopulateColumnBooleanNPBool(dataset::VerticalDataset& self,
-                                         const std::string& name,
-                                         py::array_t<bool>& data,
-                                         std::optional<int> column_idx) {
-  const auto unchecked = data.unchecked<1>();
+absl::Status PopulateColumnBooleanNPBool(
+    dataset::VerticalDataset& self, const std::string& name,
+    py::array_t<bool>& data, std::optional<dataset::proto::DType> ydf_dtype,
+    std::optional<int> column_idx) {
+  StridedSpan<bool> src_values(data);
 
-  if (data.strides(0) != data.itemsize()) {
-    return absl::InternalError("Expecting non-strided np.bool_ array.");
-  }
-  const auto values = absl::Span<const bool>(data.data(), unchecked.shape(0));
-
-  if (!column_idx) {
+  BooleanColumn* column;
+  if (!column_idx.has_value()) {
     // Create column spec
-    ASSIGN_OR_RETURN(const auto column_spec,
-                     CreateBooleanColumnSpec(name, values));
+    ASSIGN_OR_RETURN(auto column_spec,
+                     CreateBooleanColumnSpec(name, src_values));
+    if (ydf_dtype.has_value()) {
+      column_spec.set_dtype(*ydf_dtype);
+    }
     ASSIGN_OR_RETURN(auto* abstract_column, self.AddColumn(column_spec));
     // Import column data
-    ASSIGN_OR_RETURN(auto* column,
+    ASSIGN_OR_RETURN(column,
                      abstract_column->MutableCastWithStatus<BooleanColumn>());
-    column->mutable_values()->assign(values.data(),
-                                     values.data() + values.size());
   } else {
-    ASSIGN_OR_RETURN(auto* column,
+    ASSIGN_OR_RETURN(column,
                      self.MutableColumnWithCastWithStatus<BooleanColumn>(
                          column_idx.value()));
-    column->mutable_values()->insert(column->mutable_values()->end(),
-                                     values.data(),
-                                     values.data() + values.size());
+  }
+
+  std::vector<BooleanColumn::Format>& dst_values = *column->mutable_values();
+  const size_t offset = dst_values.size();
+  dst_values.resize(offset + src_values.size());
+  for (size_t i = 0; i < src_values.size(); i++) {
+    dst_values[i + offset] = src_values[i];
   }
 
   return absl::OkStatus();
@@ -449,18 +456,23 @@ absl::StatusOr<dataset::proto::Column> CreateCategoricalColumnSpec(
 // has to be set (e.g. using SetAndCheckNumRows).
 absl::Status PopulateColumnCategoricalNPBytes(
     dataset::VerticalDataset& self, const std::string& name, py::array& data,
-    const int max_vocab_count, const int min_vocab_frequency,
-    std::optional<int> column_idx, const std::optional<py::array> dictionary) {
+    std::optional<dataset::proto::DType> ydf_dtype, const int max_vocab_count,
+    const int min_vocab_frequency, std::optional<int> column_idx,
+    const std::optional<py::array> dictionary) {
   ASSIGN_OR_RETURN(const auto values, NPByteArray::Create(data));
 
   CategoricalColumn* column;
   ssize_t offset = 0;
   if (!column_idx.has_value()) {
     // Create column spec
-    ASSIGN_OR_RETURN(const auto& column_spec,
+    ASSIGN_OR_RETURN(auto column_spec,
                      CreateCategoricalColumnSpec(
                          name, values, max_vocab_count, min_vocab_frequency,
                          dataset::proto::CATEGORICAL, dictionary));
+
+    if (ydf_dtype.has_value()) {
+      column_spec.set_dtype(*ydf_dtype);
+    }
 
     // Import column data
     ASSIGN_OR_RETURN(auto* abstract_column, self.AddColumn(column_spec));
@@ -522,17 +534,22 @@ absl::Status PopulateColumnCategoricalNPBytes(
 absl::Status PopulateColumnCategoricalSetNPBytes(
     dataset::VerticalDataset& self, const std::string& name,
     py::array& data_bank, py::array_t<int64_t>& data_boundaries,
-    const int max_vocab_count, const int min_vocab_frequency,
-    std::optional<int> column_idx, const std::optional<py::array> dictionary) {
+    std::optional<dataset::proto::DType> ydf_dtype, const int max_vocab_count,
+    const int min_vocab_frequency, std::optional<int> column_idx,
+    const std::optional<py::array> dictionary) {
   ASSIGN_OR_RETURN(const auto bank, NPByteArray::Create(data_bank));
 
   CategoricalSetColumn* column;
   if (!column_idx.has_value()) {
     // Create column spec
-    ASSIGN_OR_RETURN(const auto& column_spec,
+    ASSIGN_OR_RETURN(auto column_spec,
                      CreateCategoricalColumnSpec(
                          name, bank, max_vocab_count, min_vocab_frequency,
                          dataset::proto::CATEGORICAL_SET, dictionary));
+
+    if (ydf_dtype.has_value()) {
+      column_spec.set_dtype(*ydf_dtype);
+    }
 
     // Import column data
     ASSIGN_OR_RETURN(auto* abstract_column, self.AddColumn(column_spec));
@@ -585,15 +602,82 @@ absl::Status PopulateColumnCategoricalSetNPBytes(
   return absl::OkStatus();
 }
 
+// Records, in the dataspec, which column comes from an unrolled
+// multi-dimensional feature. This function can only be called once.
+absl::Status SetMultiDimDataspec(
+    dataset::VerticalDataset& self,
+    const std::unordered_map<std::string, std::vector<std::string>>&
+        unrolling) {
+  auto& dataspec = *self.mutable_data_spec();
+
+  if (dataspec.unstackeds_size() != 0) {
+    return absl::InvalidArgumentError(
+        "Multi-dimensional information already set");
+  }
+
+  // Index column indices
+  absl::flat_hash_map<std::string, int> column_name_to_idx;
+  {
+    int column_idx = 0;
+    for (const auto& column : dataspec.columns()) {
+      column_name_to_idx[column.name()] = column_idx;
+      column_idx++;
+    }
+    DCHECK_EQ(column_idx, dataspec.columns_size());
+  }
+
+  for (const auto& [original_name, unrolled_names] : unrolling) {
+    // Column index of the first dimension
+    int begin_column_idx = -1;
+
+    for (int dim_idx = 0; dim_idx < unrolled_names.size(); dim_idx++) {
+      const auto& unrolled_name = unrolled_names[dim_idx];
+
+      // Search for the column idx of this dimension
+      const auto it_column_idx = column_name_to_idx.find(unrolled_name);
+      if (it_column_idx == column_name_to_idx.end()) {
+        return absl::InvalidArgumentError(
+            absl::Substitute("Column \"$0\" not found ", unrolled_name));
+      }
+
+      // Check that columns are contiguous
+      if (dim_idx == 0) {
+        begin_column_idx = it_column_idx->second;
+      }
+      if (it_column_idx->second != begin_column_idx + dim_idx) {
+        return absl::InvalidArgumentError("Non contiguous column");
+      }
+
+      // Tag the column
+      dataspec.mutable_columns(it_column_idx->second)->set_is_unstacked(true);
+    }
+
+    if (begin_column_idx == -1) {
+      // Note: This should never happen.
+      return absl::InvalidArgumentError(
+          "Empty unrolled columns are not allowed");
+    }
+
+    auto* unstacked = dataspec.add_unstackeds();
+    unstacked->set_original_name(original_name);
+    unstacked->set_size(unrolled_names.size());
+    unstacked->set_begin_column_idx(begin_column_idx);
+    unstacked->set_type(dataspec.columns(begin_column_idx).type());
+  }
+
+  return absl::OkStatus();
+}
+
 // Append contents of `data` to a HASH column. If no `column_idx` is not
 // given, a new column is created.
 //
 // Note that this function only creates the columns and copies the data, but it
 // does not set `num_rows` on the dataset. Before using the dataset, `num_rows
 // has to be set (e.g. using SetAndCheckNumRows).
-absl::Status PopulateColumnHashNPBytes(dataset::VerticalDataset& self,
-                                       const std::string& name, py::array& data,
-                                       std::optional<int> column_idx) {
+absl::Status PopulateColumnHashNPBytes(
+    dataset::VerticalDataset& self, const std::string& name, py::array& data,
+    std::optional<dataset::proto::DType> ydf_dtype,
+    std::optional<int> column_idx) {
   ASSIGN_OR_RETURN(const auto values, NPByteArray::Create(data));
 
   HashColumn* column;
@@ -603,6 +687,10 @@ absl::Status PopulateColumnHashNPBytes(dataset::VerticalDataset& self,
     dataset::proto::Column column_spec;
     column_spec.set_name(name);
     column_spec.set_type(dataset::proto::ColumnType::HASH);
+
+    if (ydf_dtype.has_value()) {
+      column_spec.set_dtype(*ydf_dtype);
+    }
 
     // Import column data
     ASSIGN_OR_RETURN(auto* abstract_column, self.AddColumn(column_spec));
@@ -763,26 +851,32 @@ void init_dataset(py::module_& m) {
       // Data setters
       .def("PopulateColumnCategoricalNPBytes",
            WithStatus(PopulateColumnCategoricalNPBytes), py::arg("name"),
-           py::arg("data").noconvert(), py::arg("max_vocab_count") = -1,
-           py::arg("min_vocab_frequency") = -1,
+           py::arg("data").noconvert(), py::arg("ydf_dtype"),
+           py::arg("max_vocab_count") = -1, py::arg("min_vocab_frequency") = -1,
            py::arg("column_idx") = std::nullopt,
            py::arg("dictionary") = std::nullopt)
       .def("PopulateColumnNumericalNPFloat32",
            WithStatus(PopulateColumnNumericalNPFloat32), py::arg("name"),
-           py::arg("data").noconvert(), py::arg("column_idx") = std::nullopt)
+           py::arg("data").noconvert(), py::arg("ydf_dtype"),
+           py::arg("column_idx") = std::nullopt)
       .def("PopulateColumnBooleanNPBool",
            WithStatus(PopulateColumnBooleanNPBool), py::arg("name"),
-           py::arg("data").noconvert(), py::arg("column_idx") = std::nullopt)
+           py::arg("data").noconvert(), py::arg("ydf_dtype"),
+           py::arg("column_idx") = std::nullopt)
       .def("PopulateColumnHashNPBytes", WithStatus(PopulateColumnHashNPBytes),
-           py::arg("name"), py::arg("data").noconvert(),
+           py::arg("name"), py::arg("data").noconvert(), py::arg("ydf_dtype"),
            py::arg("column_idx") = std::nullopt)
       .def("PopulateColumnCategoricalSetNPBytes",
            WithStatus(PopulateColumnCategoricalSetNPBytes), py::arg("name"),
            py::arg("data_bank").noconvert(),
-           py::arg("data_boundaries").noconvert(),
+           py::arg("data_boundaries").noconvert(), py::arg("ydf_dtype"),
            py::arg("max_vocab_count") = -1, py::arg("min_vocab_frequency") = -1,
            py::arg("column_idx") = std::nullopt,
-           py::arg("dictionary") = std::nullopt);
+           py::arg("dictionary") = std::nullopt)
+      .def("SetMultiDimDataspec", WithStatus(SetMultiDimDataspec),
+           py::arg("unrolling"),
+           "Records, in the dataspec, which columns have been unrolled from "
+           "multi-dimensional features.");
 }
 
 }  // namespace yggdrasil_decision_forests::port::python

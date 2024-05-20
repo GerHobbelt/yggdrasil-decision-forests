@@ -84,7 +84,11 @@ pybind_library(
 
 py_library(
     name = "generic_model",
-    srcs = ["generic_model.py"],
+    srcs = [
+        "export_jax.py",
+        "export_tf.py",
+        "generic_model.py",
+    ],
     deps = [
         ":analysis",
         ":model_metadata",
@@ -92,12 +96,14 @@ py_library(
         ":template_cpp_export",
         # absl/logging dep,
         # numpy dep,
+        # tensorflow_decision_forests dep,
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "@ydf_cc//yggdrasil_decision_forests/metric:metric_py_proto",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_py_proto",
         "//ydf/cc:ydf",
         "//ydf/dataset",
         "//ydf/dataset:dataspec",
+        "//ydf/dataset/io:dataset_io",
         "//ydf/metric",
         "//ydf/utils:html",
         "//ydf/utils:log",
@@ -124,8 +130,12 @@ py_library(
     name = "analysis",
     srcs = ["analysis.py"],
     deps = [
+        # numpy dep,
+        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "//ydf/cc:ydf",
+        "//ydf/dataset:dataspec",
         "@ydf_cc//yggdrasil_decision_forests/utils:model_analysis_py_proto",
+        "@ydf_cc//yggdrasil_decision_forests/utils:partial_dependence_plot_py_proto",
     ],
 )
 
@@ -167,6 +177,7 @@ py_test(
     ],
     python_version = "PY3",
     deps = [
+        ":analysis",
         ":generic_model",
         ":model_lib",
         ":model_metadata",
@@ -190,9 +201,11 @@ py_test(
         "@ydf_cc//yggdrasil_decision_forests/test_data",
     ],
     python_version = "PY3",
+    shard_count = 5,
     # TODO: This test fails in OSS due to a package name clash on yggdrasil_decision_forests.
     tags = ["manual"],
     deps = [
+        ":generic_model",
         ":model_lib",
         # absl/logging dep,
         # absl/testing:absltest dep,
@@ -201,6 +214,8 @@ py_test(
         # pandas dep,
         # tensorflow dep,
         # tensorflow_decision_forests dep,
+        "//ydf/dataset:dataspec",
+        "//ydf/learner:generic_learner",
         "//ydf/learner:specialized_learners",
         "//ydf/utils:test_utils",
     ],
@@ -260,5 +275,26 @@ py_test(
         # absl/testing:parameterized dep,
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_py_proto",
         "@ydf_cc//yggdrasil_decision_forests/model:hyperparameter_py_proto",
+    ],
+)
+
+py_test(
+    name = "jax_model_test",
+    srcs = ["jax_model_test.py"],
+    data = [
+        "//test_data",
+        "@ydf_cc//yggdrasil_decision_forests/test_data",
+    ],
+    python_version = "PY3",
+    deps = [
+        ":generic_model",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        # jax dep,
+        # numpy dep,
+        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
+        "//ydf/dataset:dataspec",
+        "//ydf/learner:generic_learner",
+        "//ydf/learner:specialized_learners",
     ],
 )

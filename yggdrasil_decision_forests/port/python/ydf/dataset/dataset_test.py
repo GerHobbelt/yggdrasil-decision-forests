@@ -79,6 +79,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_pos",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=dataspec.np_dtype_to_ydf_dtype(dtype),
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=2,
@@ -90,6 +91,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_neg",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=dataspec.np_dtype_to_ydf_dtype(dtype),
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=-2,
@@ -101,6 +103,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_zero",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=dataspec.np_dtype_to_ydf_dtype(dtype),
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=0,
@@ -129,6 +132,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_single_nan",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=dataspec.np_dtype_to_ydf_dtype(dtype),
                 count_nas=1,
                 numerical=ds_pb.NumericalSpec(
                     mean=1.5,
@@ -140,6 +144,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_nan_only",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=dataspec.np_dtype_to_ydf_dtype(dtype),
                 count_nas=3,
                 numerical=ds_pb.NumericalSpec(),
             ),
@@ -172,6 +177,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col2",
                 type=ds_pb.ColumnType.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 count_nas=1,
                 categorical=ds_pb.CategoricalSpec(
                     items={
@@ -186,6 +192,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col1",
                 type=ds_pb.ColumnType.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 count_nas=0,
                 categorical=ds_pb.CategoricalSpec(
                     items={
@@ -222,6 +229,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col1",
                 type=ds_pb.ColumnType.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 categorical=ds_pb.CategoricalSpec(
                     items={
@@ -249,6 +257,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_boolean",
                 type=ds_pb.ColumnType.BOOLEAN,
+                dtype=ds_pb.DType.DTYPE_BOOL,
                 count_nas=0,
                 boolean=ds_pb.BooleanSpec(
                     count_true=1,
@@ -273,6 +282,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_hash",
                 type=ds_pb.ColumnType.HASH,
+                dtype=ds_pb.DType.DTYPE_BYTES,
             ),
         ),
     )
@@ -295,6 +305,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_numerical",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=2,
@@ -319,6 +330,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="a",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=2,
@@ -330,6 +342,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="b",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=-2,
@@ -358,6 +371,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_num",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=2,
@@ -369,6 +383,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_cat",
                 type=ds_pb.ColumnType.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 count_nas=0,
                 categorical=ds_pb.CategoricalSpec(
                     items={
@@ -382,6 +397,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_bool",
                 type=ds_pb.ColumnType.BOOLEAN,
+                dtype=ds_pb.DType.DTYPE_BOOL,
                 count_nas=0,
                 boolean=ds_pb.BooleanSpec(
                     count_true=55,
@@ -405,6 +421,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_num",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=2,
@@ -416,6 +433,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_cat",
                 type=ds_pb.ColumnType.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 count_nas=0,
                 categorical=ds_pb.CategoricalSpec(
                     items={
@@ -429,6 +447,7 @@ class GenericDatasetTest(parameterized.TestCase):
             ds_pb.Column(
                 name="col_bool",
                 type=ds_pb.ColumnType.BOOLEAN,
+                dtype=ds_pb.DType.DTYPE_BOOL,
                 count_nas=0,
                 boolean=ds_pb.BooleanSpec(
                     count_true=55,
@@ -497,6 +516,7 @@ four entries,4,8,4.4,0
             ds_pb.Column(
                 name="col1",
                 type=ds_pb.ColumnType.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 count_nas=0,
                 categorical=ds_pb.CategoricalSpec(
                     items={
@@ -547,6 +567,7 @@ four entries,4,8,4.4,0
             ds_pb.Column(
                 name="col",
                 type=ds_pb.ColumnType.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BOOL,
                 count_nas=count_nas,
                 categorical=ds_pb.CategoricalSpec(
                     items={
@@ -577,6 +598,7 @@ four entries,4,8,4.4,0
             ds_pb.Column(
                 name="col",
                 type=ds_pb.ColumnType.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BOOL,
                 count_nas=count_nas,
                 categorical=ds_pb.CategoricalSpec(
                     items={
@@ -758,12 +780,14 @@ B,3""")
             ds_pb.Column(
                 name="Bool_1",
                 type=ds_pb.BOOLEAN,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 is_manual_type=False,
                 boolean=ds_pb.BooleanSpec(count_true=2, count_false=2),
             ),
             ds_pb.Column(
                 name="Cat_2",
                 type=ds_pb.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 is_manual_type=False,
                 categorical=ds_pb.CategoricalSpec(
                     number_of_unique_values=3,
@@ -782,6 +806,7 @@ B,3""")
             ds_pb.Column(
                 name="Num_1",
                 type=ds_pb.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_FLOAT32,
                 is_manual_type=False,
                 numerical=ds_pb.NumericalSpec(
                     mean=2.5,
@@ -811,12 +836,14 @@ B,3""")
             ds_pb.Column(
                 name="Bool_1",
                 type=ds_pb.BOOLEAN,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 is_manual_type=False,
                 boolean=ds_pb.BooleanSpec(count_true=2, count_false=2),
             ),
             ds_pb.Column(
                 name="Cat_2",
                 type=ds_pb.CATEGORICAL,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 is_manual_type=False,
                 categorical=ds_pb.CategoricalSpec(
                     number_of_unique_values=3,
@@ -835,6 +862,7 @@ B,3""")
             ds_pb.Column(
                 name="Num_1",
                 type=ds_pb.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_FLOAT32,
                 is_manual_type=False,
                 numerical=ds_pb.NumericalSpec(
                     mean=2.5,
@@ -858,6 +886,7 @@ B,3""")
             ds_pb.Column(
                 name="feature.0_of_3",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=2,
@@ -865,10 +894,12 @@ B,3""")
                     min_value=0,
                     max_value=4,
                 ),
+                is_unstacked=True,
             ),
             ds_pb.Column(
                 name="feature.1_of_3",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=3,
@@ -876,10 +907,12 @@ B,3""")
                     min_value=1,
                     max_value=5,
                 ),
+                is_unstacked=True,
             ),
             ds_pb.Column(
                 name="feature.2_of_3",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_INT64,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=4,
@@ -887,6 +920,15 @@ B,3""")
                     min_value=2,
                     max_value=6,
                 ),
+                is_unstacked=True,
+            ),
+        ),
+        unstackeds=(
+            ds_pb.Unstacked(
+                original_name="feature",
+                begin_column_idx=0,
+                size=3,
+                type=ds_pb.ColumnType.NUMERICAL,
             ),
         ),
     )
@@ -944,7 +986,7 @@ four entries,8,4,4.4
 """
     self.assertEqual(expected_dataset_content, ds._dataset.DebugString())
 
-  def test_singledimensional_strided(self):
+  def test_singledimensional_strided_float32(self):
     data = np.array([[0, 1], [4, 5]], np.float32)
     feature = data[:, 0]  # "feature" shares the same memory as "data".
     self.assertEqual(data.strides, (8, 4))
@@ -957,6 +999,7 @@ four entries,8,4,4.4
             ds_pb.Column(
                 name="feature",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_FLOAT32,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=2,
@@ -968,9 +1011,32 @@ four entries,8,4,4.4
         ),
     )
     test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
+    self.assertEqual("feature\n0\n4\n", ds._dataset.DebugString())
 
-    expected_dataset_content = "feature\n0\n4\n"
-    self.assertEqual(expected_dataset_content, ds._dataset.DebugString())
+  def test_singledimensional_strided_boolean(self):
+    data = np.array([[True, False], [False, True]])
+    feature = data[:, 0]  # "feature" shares the same memory as "data".
+    self.assertEqual(data.strides, (2, 1))
+    self.assertEqual(feature.strides, (2,))
+
+    ds = dataset.create_vertical_dataset({"feature": feature})
+    expected_data_spec = ds_pb.DataSpecification(
+        created_num_rows=2,
+        columns=(
+            ds_pb.Column(
+                name="feature",
+                type=ds_pb.ColumnType.BOOLEAN,
+                dtype=ds_pb.DType.DTYPE_BOOL,
+                count_nas=0,
+                boolean=ds_pb.BooleanSpec(
+                    count_true=1,
+                    count_false=1,
+                ),
+            ),
+        ),
+    )
+    test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
+    self.assertEqual("feature\n1\n0\n", ds._dataset.DebugString())
 
   def test_multidimensional_strided(self):
     # Note: multidimensional features are unrolled into singledimensional
@@ -984,6 +1050,7 @@ four entries,8,4,4.4
             ds_pb.Column(
                 name="feature.0_of_3",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_FLOAT32,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=2,
@@ -991,10 +1058,12 @@ four entries,8,4,4.4
                     min_value=0,
                     max_value=4,
                 ),
+                is_unstacked=True,
             ),
             ds_pb.Column(
                 name="feature.1_of_3",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_FLOAT32,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=3,
@@ -1002,10 +1071,12 @@ four entries,8,4,4.4
                     min_value=1,
                     max_value=5,
                 ),
+                is_unstacked=True,
             ),
             ds_pb.Column(
                 name="feature.2_of_3",
                 type=ds_pb.ColumnType.NUMERICAL,
+                dtype=ds_pb.DType.DTYPE_FLOAT32,
                 count_nas=0,
                 numerical=ds_pb.NumericalSpec(
                     mean=4,
@@ -1013,6 +1084,15 @@ four entries,8,4,4.4
                     min_value=2,
                     max_value=6,
                 ),
+                is_unstacked=True,
+            ),
+        ),
+        unstackeds=(
+            ds_pb.Unstacked(
+                original_name="feature",
+                begin_column_idx=0,
+                size=3,
+                type=ds_pb.ColumnType.NUMERICAL,
             ),
         ),
     )
@@ -1110,7 +1190,7 @@ second sentence foo bar foo foo foo""",
     ds = dataset.create_vertical_dataset(
         "csv:" + path_to_csv,
         min_vocab_frequency=1,
-        columns=[("col_cat_set", Semantic.CATEGORICAL_SET)]
+        columns=[("col_cat_set", Semantic.CATEGORICAL_SET)],
     )
     expected_data_spec = self.toy_csv_dataspec_catset()
     test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
@@ -1138,23 +1218,24 @@ second sentence foo bar foo foo foo
         "csv:" + path_to_csv, data_spec=data_spec
     )
     test_utils.assertProto2Equal(self, ds.data_spec(), data_spec)
-    self.assertEqual(ds._dataset.DebugString(), """\
+    self.assertEqual(
+        ds._dataset.DebugString(),
+        """\
 col_cat_set
 foo, bar, sentence, first
 foo, bar, sentence, second
-""")
+""",
+    )
 
   def test_pd_list_of_list(self):
-    df = pd.DataFrame(
-        {
-            "feature": [
-                ["single item"],
-                ["two", "words"],
-                ["three", "simple", "words", "words"],
-                [""],
-            ]
-        }
-    )
+    df = pd.DataFrame({
+        "feature": [
+            ["single item"],
+            ["two", "words"],
+            ["three", "simple", "words", "words"],
+            [""],
+        ]
+    })
     ds = dataset.create_vertical_dataset(
         df,
         min_vocab_frequency=1,
@@ -1166,6 +1247,7 @@ foo, bar, sentence, second
             ds_pb.Column(
                 name="feature",
                 type=ds_pb.ColumnType.CATEGORICAL_SET,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 categorical=ds_pb.CategoricalSpec(
                     items={
                         "<OOD>": VocabValue(index=0, count=0),
@@ -1195,16 +1277,14 @@ foo, bar, sentence, second
       )
 
   def test_pd_np_bytes(self):
-    df = pd.DataFrame(
-        {
-            "feature": [
-                np.array(["single item"], np.bytes_),
-                np.array(["two", "words"], np.bytes_),
-                np.array(["three", "simple", "words", "words"], np.bytes_),
-                np.array([""], np.bytes_),
-            ]
-        }
-    )
+    df = pd.DataFrame({
+        "feature": [
+            np.array(["single item"], np.bytes_),
+            np.array(["two", "words"], np.bytes_),
+            np.array(["three", "simple", "words", "words"], np.bytes_),
+            np.array([""], np.bytes_),
+        ]
+    })
     ds = dataset.create_vertical_dataset(
         df,
         min_vocab_frequency=1,
@@ -1216,6 +1296,7 @@ foo, bar, sentence, second
             ds_pb.Column(
                 name="feature",
                 type=ds_pb.ColumnType.CATEGORICAL_SET,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 categorical=ds_pb.CategoricalSpec(
                     items={
                         "<OOD>": VocabValue(index=0, count=0),
@@ -1234,16 +1315,14 @@ foo, bar, sentence, second
     test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
 
   def test_pd_with_na(self):
-    df = pd.DataFrame(
-        {
-            "feature": [
-                pd.NA,
-                ["single item"],
-                ["two", "words"],
-                ["three", "simple", "words", "words"],
-            ]
-        }
-    )
+    df = pd.DataFrame({
+        "feature": [
+            pd.NA,
+            ["single item"],
+            ["two", "words"],
+            ["three", "simple", "words", "words"],
+        ]
+    })
     ds = dataset.create_vertical_dataset(
         df,
         min_vocab_frequency=1,
@@ -1255,6 +1334,7 @@ foo, bar, sentence, second
             ds_pb.Column(
                 name="feature",
                 type=ds_pb.ColumnType.CATEGORICAL_SET,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 categorical=ds_pb.CategoricalSpec(
                     items={
                         "<OOD>": VocabValue(index=0, count=0),
@@ -1273,16 +1353,14 @@ foo, bar, sentence, second
     test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
 
   def test_pd_with_empty_list(self):
-    df = pd.DataFrame(
-        {
-            "feature": [
-                [],
-                ["single item"],
-                ["two", "words"],
-                ["three", "simple", "words", "words"],
-            ]
-        }
-    )
+    df = pd.DataFrame({
+        "feature": [
+            [],
+            ["single item"],
+            ["two", "words"],
+            ["three", "simple", "words", "words"],
+        ]
+    })
     ds = dataset.create_vertical_dataset(
         df,
         min_vocab_frequency=1,
@@ -1294,6 +1372,7 @@ foo, bar, sentence, second
             ds_pb.Column(
                 name="feature",
                 type=ds_pb.ColumnType.CATEGORICAL_SET,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 categorical=ds_pb.CategoricalSpec(
                     items={
                         "<OOD>": VocabValue(index=0, count=0),
@@ -1330,6 +1409,7 @@ foo, bar, sentence, second
             ds_pb.Column(
                 name="feature",
                 type=ds_pb.ColumnType.CATEGORICAL_SET,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 categorical=ds_pb.CategoricalSpec(
                     items={
                         "<OOD>": VocabValue(index=0, count=0),
@@ -1364,6 +1444,7 @@ foo, bar, sentence, second
             ds_pb.Column(
                 name="feature",
                 type=ds_pb.ColumnType.CATEGORICAL_SET,
+                dtype=ds_pb.DType.DTYPE_BYTES,
                 categorical=ds_pb.CategoricalSpec(
                     items={
                         "<OOD>": VocabValue(index=0, count=0),
@@ -1401,6 +1482,7 @@ class MissingColumnsTest(parameterized.TestCase):
               ds_pb.Column(
                   name="f1",
                   type=ds_pb.ColumnType.CATEGORICAL,
+                  dtype=ds_pb.DType.DTYPE_BYTES,
                   categorical=ds_pb.CategoricalSpec(
                       items={
                           "<OOD>": VocabValue(index=0, count=0),
@@ -1415,6 +1497,7 @@ class MissingColumnsTest(parameterized.TestCase):
               ds_pb.Column(
                   name="f2",
                   type=ds_pb.ColumnType.CATEGORICAL,
+                  dtype=ds_pb.DType.DTYPE_BYTES,
                   categorical=ds_pb.CategoricalSpec(
                       items={
                           "<OOD>": VocabValue(index=0, count=0),
@@ -1438,6 +1521,7 @@ class MissingColumnsTest(parameterized.TestCase):
               ds_pb.Column(
                   name="f1",
                   type=ds_pb.ColumnType.NUMERICAL,
+                  dtype=ds_pb.DType.DTYPE_INT64,
                   numerical=ds_pb.NumericalSpec(
                       mean=2.0,
                       min_value=1.0,
@@ -1455,6 +1539,7 @@ class MissingColumnsTest(parameterized.TestCase):
               ds_pb.Column(
                   name="f1",
                   type=ds_pb.ColumnType.CATEGORICAL,
+                  dtype=ds_pb.DType.DTYPE_INT64,
                   categorical=ds_pb.CategoricalSpec(
                       items={
                           "<OOD>": VocabValue(index=0, count=0),

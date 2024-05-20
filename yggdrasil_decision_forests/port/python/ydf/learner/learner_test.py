@@ -26,6 +26,7 @@ import numpy.testing as npt
 import pandas as pd
 
 from yggdrasil_decision_forests.dataset import data_spec_pb2
+from yggdrasil_decision_forests.dataset import data_spec_pb2 as ds_pb
 from yggdrasil_decision_forests.learner import abstract_learner_pb2
 from yggdrasil_decision_forests.model import abstract_model_pb2
 from ydf.dataset import dataspec
@@ -458,6 +459,7 @@ class RandomForestLearnerTest(LearnerTest):
         data_spec_pb2.Column(
             name="feature.0_of_4",
             type=data_spec_pb2.ColumnType.NUMERICAL,
+            dtype=ds_pb.DType.DTYPE_INT64,
             count_nas=0,
             numerical=data_spec_pb2.NumericalSpec(
                 mean=2,
@@ -465,10 +467,12 @@ class RandomForestLearnerTest(LearnerTest):
                 min_value=0,
                 max_value=4,
             ),
+            is_unstacked=True,
         ),
         data_spec_pb2.Column(
             name="feature.1_of_4",
             type=data_spec_pb2.ColumnType.NUMERICAL,
+            dtype=ds_pb.DType.DTYPE_INT64,
             count_nas=0,
             numerical=data_spec_pb2.NumericalSpec(
                 mean=3,
@@ -476,10 +480,12 @@ class RandomForestLearnerTest(LearnerTest):
                 min_value=1,
                 max_value=5,
             ),
+            is_unstacked=True,
         ),
         data_spec_pb2.Column(
             name="feature.2_of_4",
             type=data_spec_pb2.ColumnType.NUMERICAL,
+            dtype=ds_pb.DType.DTYPE_INT64,
             count_nas=0,
             numerical=data_spec_pb2.NumericalSpec(
                 mean=4,
@@ -487,10 +493,12 @@ class RandomForestLearnerTest(LearnerTest):
                 min_value=2,
                 max_value=6,
             ),
+            is_unstacked=True,
         ),
         data_spec_pb2.Column(
             name="feature.3_of_4",
             type=data_spec_pb2.ColumnType.NUMERICAL,
+            dtype=ds_pb.DType.DTYPE_INT64,
             count_nas=0,
             numerical=data_spec_pb2.NumericalSpec(
                 mean=5,
@@ -498,6 +506,7 @@ class RandomForestLearnerTest(LearnerTest):
                 min_value=3,
                 max_value=7,
             ),
+            is_unstacked=True,
         ),
     ]
     # Skip the first column that contains the label.
@@ -506,12 +515,29 @@ class RandomForestLearnerTest(LearnerTest):
     predictions = model.predict(data)
     self.assertEqual(predictions.shape, (2,))
 
+  def test_multidimensional_features_with_feature_arg(self):
+    ds = {
+        "f1": np.random.uniform(size=(100, 5)),
+        "f2": np.random.uniform(size=(100, 5)),
+        "label": np.random.randint(0, 2, size=100),
+    }
+    learner = specialized_learners.RandomForestLearner(
+        label="label",
+        features=["f1"],
+        num_trees=3,
+    )
+    model = learner.train(ds)
+    self.assertEqual(
+        model.input_feature_names(),
+        ["f1.0_of_5", "f1.1_of_5", "f1.2_of_5", "f1.3_of_5", "f1.4_of_5"],
+    )
+
   def test_multidimensional_labels(self):
     ds = {
         "feature": np.array([[0, 1], [1, 0]]),
         "label": np.array([[0, 1], [1, 0]]),
     }
-    learner = specialized_learners.GradientBoostedTreesLearner(label="label")
+    learner = specialized_learners.RandomForestLearner(label="label")
     with self.assertRaisesRegex(
         test_utils.AbslInvalidArgumentError,
         "The column 'label' is multi-dimensional \\(shape=\\(2, 2\\)\\) while"
@@ -525,7 +551,7 @@ class RandomForestLearnerTest(LearnerTest):
         "label": np.array([0, 1]),
         "weight": np.array([[0, 1], [1, 0]]),
     }
-    learner = specialized_learners.GradientBoostedTreesLearner(
+    learner = specialized_learners.RandomForestLearner(
         label="label", weights="weight"
     )
     with self.assertRaisesRegex(

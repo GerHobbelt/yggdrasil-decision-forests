@@ -55,6 +55,7 @@
 #include "yggdrasil_decision_forests/utils/distribution.h"
 #include "yggdrasil_decision_forests/utils/distribution.pb.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
+#include "yggdrasil_decision_forests/utils/protobuf.h"
 #include "yggdrasil_decision_forests/utils/random.h"
 #include "yggdrasil_decision_forests/utils/sharded_io.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
@@ -866,8 +867,9 @@ void AbstractModel::AppendDescriptionAndStatistics(
   } else {
     absl::StrAppend(description, "Trained with weights\n");
     if (full_definition) {
-      absl::StrAppend(description, "\nWeights:\n",
-                      weights_.value().DebugString(), "n");
+      absl::StrAppend(
+          description, "\nWeights:\n",
+          utils::SerializeTextProto(weights_.value()).value_or("ERROR"), "n");
     }
   }
 

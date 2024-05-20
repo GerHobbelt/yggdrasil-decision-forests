@@ -14,10 +14,12 @@
 
 """Dataspec utilities."""
 
-import copy
 import dataclasses
 import enum
+import logging
 from typing import Any, Dict, List, Literal, Optional, Sequence, Tuple, Union
+
+import numpy as np
 
 from yggdrasil_decision_forests.dataset import data_spec_pb2 as ds_pb
 
@@ -33,6 +35,66 @@ NormalizedColumnDefs = Optional[List["Column"]]
 # Must match kOutOfDictionaryItemKey in
 # yggdrasil_decision_forests/dataset/data_spec.h
 YDF_OOD = "<OOD>"
+
+# Mapping between Numpy dtypes and YDF dtypes.
+_NP_DTYPE_TO_YDF_DTYPE = {
+    np.int8: ds_pb.DType.DTYPE_INT8,
+    np.int16: ds_pb.DType.DTYPE_INT16,
+    np.int32: ds_pb.DType.DTYPE_INT32,
+    np.int64: ds_pb.DType.DTYPE_INT64,
+    np.uint8: ds_pb.DType.DTYPE_UINT8,
+    np.uint16: ds_pb.DType.DTYPE_UINT16,
+    np.uint32: ds_pb.DType.DTYPE_UINT32,
+    np.uint64: ds_pb.DType.DTYPE_UINT64,
+    np.float16: ds_pb.DType.DTYPE_FLOAT16,
+    np.float32: ds_pb.DType.DTYPE_FLOAT32,
+    np.float64: ds_pb.DType.DTYPE_FLOAT64,
+    np.bool_: ds_pb.DType.DTYPE_BOOL,
+    np.string_: ds_pb.DType.DTYPE_BYTES,
+    np.str_: ds_pb.DType.DTYPE_BYTES,
+    np.bytes_: ds_pb.DType.DTYPE_BYTES,
+    np.object_: ds_pb.DType.DTYPE_BYTES,
+}
+
+NP_SUPPORTED_INT_DTYPE = [
+    np.int8,
+    np.int16,
+    np.int32,
+    np.int64,
+    np.uint8,
+    np.uint16,
+    np.uint32,
+    np.uint64,
+]
+
+NP_SUPPORTED_FLOAT_DTYPE = [
+    np.float16,
+    np.float32,
+    np.float64,
+]
+
+
+def np_dtype_to_ydf_dtype(np_dtype: np.dtype) -> Optional["ds_pb.DType"]:
+  """Converts a Numpy dtype to a YDF dtype.
+
+  If the numpy dtype has no matching ydf dtype, returns None.
+
+  Args:
+    np_dtype: Numpy dtype.
+
+  Returns:
+    YDF dtype.
+  """
+
+  if hasattr(np_dtype, "type"):
+    ydf_dtype = _NP_DTYPE_TO_YDF_DTYPE.get(np_dtype.type)
+  else:
+    ydf_dtype = _NP_DTYPE_TO_YDF_DTYPE.get(np_dtype)
+
+  if ydf_dtype is None:
+    raise ValueError(f"ydf_dtype: {ydf_dtype!r} {np_dtype!r}")
+
+  return ydf_dtype
 
 
 class Semantic(enum.Enum):
@@ -320,7 +382,7 @@ def normalize_column_defs(
 
 
 def _normalized_column(
-    column: Union[Column, str, Tuple[str, Semantic]]
+    column: Union[Column, str, Tuple[str, Semantic]],
 ) -> Column:
   """Normalizes a single column."""
 
@@ -440,7 +502,8 @@ def get_all_columns(
     available_columns: Sequence[str],
     inference_args: DataSpecInferenceArgs,
     required_columns: Optional[Sequence[str]],
-) -> Sequence[Column]:
+    unroll_feature_info: Dict[str, List[str]] = {},
+) -> Tuple[Sequence[Column], Dict[str, List[str]]]:
   """Gets all the columns to use by the model / learner.
 
   Args:
@@ -451,10 +514,12 @@ def get_all_columns(
       columns is important. First should come the columns in
       `inference_args.columns` in unchanged order, then any remaining columns in
       the order they appear at in the data.
+    unroll_feature_info: Information about feature unrolling.
 
   Returns:
-    The list of model input columns. This includes the required columns plus the
-      specified columns in the inference_args that are available
+    The list of model input columns (This includes the required columns plus the
+    specified columns in the inference_args that are available), and the
+    actually used unrolled features.
 
   Raises:
     ValueError: One of the required columns is not available
@@ -468,14 +533,28 @@ def get_all_columns(
         f" columns: {required_columns}, available columns: {available_columns}"
     )
 
+  used_unroll_feature_info = {}
+
   if inference_args.columns is None:
+    # The user did not filter on the column names, so we use all the columns.
     specified_columns = [Column(col) for col in available_columns]
+    used_unroll_feature_info.update(unroll_feature_info)
   else:
     specified_columns = []
     # Add the specified columns in order, but ignore those that do not exist.
     for col in inference_args.columns:
       if col.name in available_columns_as_set:
+        if col.name in unroll_feature_info:
+          raise ValueError(
+              f"Column {col.name!r} is available both natively and unrolled."
+          )
         specified_columns.append(col)
+      elif col.name in unroll_feature_info:
+        if col.name in unroll_feature_info:
+          used_unroll_feature_info[col.name] = unroll_feature_info[col.name]
+        specified_columns.extend(
+            [Column(col) for col in unroll_feature_info[col.name]]
+        )
       else:
         if required_columns is None or col.name in required_columns_as_set:
           raise ValueError(
@@ -484,7 +563,10 @@ def get_all_columns(
           )
 
   specified_columns_names = set(col.name for col in specified_columns)
-  if inference_args.include_all_columns:
+  if inference_args.include_all_columns and inference_args.columns is not None:
+    # The user specified the type of some of the columns, but asked for all the
+    # columns to be used.
+    used_unroll_feature_info.update(unroll_feature_info)
     for col_name in available_columns:
       if col_name not in specified_columns_names:
         specified_columns.append(Column(col_name))
@@ -496,10 +578,10 @@ def get_all_columns(
         col_name in required_columns_as_set
         and col_name not in specified_columns_names
     ):
+      # Note: Required columns that are not already included, are not unrolled.
       specified_columns.append(Column(col_name))
       specified_columns_names.add(col_name)
-
-  return specified_columns
+  return specified_columns, used_unroll_feature_info
 
 
 def priority(a: Any, b: Any) -> Any:
