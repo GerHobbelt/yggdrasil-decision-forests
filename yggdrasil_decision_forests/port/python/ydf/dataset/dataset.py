@@ -153,6 +153,33 @@ class VerticalDataset:
           )
         return
 
+    elif column.semantic == dataspec.Semantic.CATEGORICAL_SET:
+      if column_data.dtype.type != np.object_:
+        raise ValueError("Categorical Set columns must be a list of lists.")
+      if len(column_data) > 0:
+        if column_data[0] and not isinstance(
+            column_data[0], (list, np.ndarray)
+        ):
+          raise ValueError("Categorical Set columns must be a list of lists.")
+      # TODO: b/313414785 - Consider speeding this up by moving logic to C++.
+      # np.unique also sorts the unique elements, which is expected by YDF.
+      column_data = [np.unique(row).astype(np.bytes_) for row in column_data]
+      boundaries = np.cumsum(
+          [0] + [len(row) for row in column_data[:-1]], dtype=np.int64
+      )
+      bank = np.concatenate(column_data)
+
+      if inference_args is not None:
+        guide = dataspec.categorical_column_guide(column, inference_args)
+        self._dataset.PopulateColumnCategoricalSetNPBytes(
+            column.name, bank, boundaries, **guide
+        )
+      else:
+        self._dataset.PopulateColumnCategoricalSetNPBytes(
+            column.name, bank, boundaries, column_idx=column_idx
+        )
+      return
+
     elif column.semantic == dataspec.Semantic.HASH:
       if not isinstance(column_data, np.ndarray):
         column_data = np.array(column_data, dtype=np.bytes_)
@@ -214,9 +241,21 @@ def create_vertical_dataset(
     min_vocab_frequency: int = 5,
     discretize_numerical_columns: bool = False,
     num_discretized_numerical_bins: int = 255,
+    max_num_scanned_rows_to_infer_semantic: int = 10000,
+    max_num_scanned_rows_to_compute_statistics: int = 10000,
     data_spec: Optional[data_spec_pb2.DataSpecification] = None,
 ) -> VerticalDataset:
   """Creates a VerticalDataset from various sources of data.
+
+  The feature semantics are automatically determined and can be explicitly
+  set with the `columns` argument. The semantics of a dataset (or model) are
+  available its data_spec.
+  
+  Note that the CATEGORICAL_SET semantic is not automatically inferred when
+  reading from file. When reading from CSV files, setting the CATEGORICAL_SET
+  semantic for a feature will have YDF tokenize the feature. When reading from
+  in-memory datasets (e.g. pandas), YDF only accepts lists of lists for
+  CATEGORICAL_SET features.
 
   Usage example:
 
@@ -267,6 +306,20 @@ def create_vertical_dataset(
       definition of DISCRETIZED_NUMERICAL for more details.
     num_discretized_numerical_bins: Number of bins used when disretizing
       numerical columns.
+    max_num_scanned_rows_to_infer_semantic: Number of rows to scan when
+      inferring the column's semantic if it is not explicitly specified. Only
+      used when reading from file, in-memory datasets are always read in full.
+      Setting this to a lower number will speed up dataset reading, but might
+      result in incorrect column semantics. Set to -1 to scan the entire
+      dataset.
+    max_num_scanned_rows_to_compute_statistics: Number of rows to scan when
+      computing a column's statistics. Only used when reading from file,
+      in-memory datasets are always read in full. A column's statistics include
+      the dictionary for categorical features and the mean / min / max for
+      numerical features. Setting this to a lower number will speed up dataset
+      reading, but skew statistics in the dataspec, which can hurt model quality
+      (e.g. if an important category of a categorical feature is considered
+      OOV). Set to -1 to scan the entire dataset.
     data_spec: Dataspec to be used for this dataset. If a data spec is given,
       all other arguments except `data` should not be provided.
 
@@ -296,6 +349,8 @@ def create_vertical_dataset(
         min_vocab_frequency=min_vocab_frequency,
         discretize_numerical_columns=discretize_numerical_columns,
         num_discretized_numerical_bins=num_discretized_numerical_bins,
+        max_num_scanned_rows_to_infer_semantic=max_num_scanned_rows_to_infer_semantic,
+        max_num_scanned_rows_to_compute_statistics=max_num_scanned_rows_to_compute_statistics,
     )
     return create_vertical_dataset_with_spec_or_args(
         data, inference_args=inference_args, data_spec=None
@@ -370,6 +425,16 @@ def create_vertical_dataset_from_dict_of_values(
             f"The data spec expects columns {column_spec.name} which was not"
             f" found in the data. Available columns: {list(data)}"
         )
+      if (
+          column_spec.type == data_spec_pb2.CATEGORICAL_SET
+          and column_spec.HasField("tokenizer")
+          and column_spec.tokenizer.splitter
+          != data_spec_pb2.Tokenizer.NO_SPLITTING
+      ):
+        log.warning(
+            f"The dataspec for columns {column_spec.name} specifies a"
+            " tokenizer, but it is ignored when reading in-memory datasets."
+        )
       normalized_columns.append(
           dataspec.Column(
               name=column_spec.name,
@@ -428,7 +493,18 @@ def infer_semantic(name: str, data: Any) -> dataspec.Semantic:
     ]:
       return dataspec.Semantic.NUMERICAL
 
-    if data.dtype.type in [np.string_, np.bytes_, np.object_]:
+    if data.dtype.type in [np.string_, np.bytes_]:
+      return dataspec.Semantic.CATEGORICAL
+
+    if data.dtype.type in [np.object_]:
+      # For performance reasons, only check the type on the first and last item
+      # of the column if it is tokenized.
+      if (
+          len(data) > 0
+          and (isinstance(data[0], list) or isinstance(data[0], np.ndarray))
+          and (isinstance(data[-1], list) or isinstance(data[-1], np.ndarray))
+      ):
+        return dataspec.Semantic.CATEGORICAL_SET
       return dataspec.Semantic.CATEGORICAL
 
     if data.dtype.type in [np.bool_]:

@@ -376,7 +376,7 @@ TEST_F(GradientBoostedTreesOnAdult, BaseDeprecated) {
   auto* gbt_model =
       dynamic_cast<const GradientBoostedTreesModel*>(model_.get());
   EXPECT_TRUE(gbt_model->CheckStructure(
-      decision_tree::CheckStructureOptions::GlobalImuptation()));
+      decision_tree::CheckStructureOptions::GlobalImputation()));
 }
 
 // Train and test a model on the adult dataset.
@@ -398,7 +398,7 @@ TEST_F(GradientBoostedTreesOnAdult, Base) {
   auto* gbt_model =
       dynamic_cast<const GradientBoostedTreesModel*>(model_.get());
   EXPECT_TRUE(gbt_model->CheckStructure(
-      decision_tree::CheckStructureOptions::GlobalImuptation()));
+      decision_tree::CheckStructureOptions::GlobalImputation()));
 }
 
 TEST_F(GradientBoostedTreesOnAdult, MonotonicConstraints) {
@@ -778,7 +778,7 @@ TEST_F(GradientBoostedTreesOnAdult, RandomCategorical) {
   auto* gbt_model =
       dynamic_cast<const GradientBoostedTreesModel*>(model_.get());
   EXPECT_TRUE(gbt_model->CheckStructure(
-      decision_tree::CheckStructureOptions::GlobalImuptation()));
+      decision_tree::CheckStructureOptions::GlobalImputation()));
 }
 
 // Train and test a model on the adult dataset with too much nodes for the
@@ -801,7 +801,7 @@ TEST_F(GradientBoostedTreesOnAdult, BaseNoQuickScorer) {
   auto* gbt_model =
       dynamic_cast<const GradientBoostedTreesModel*>(model_.get());
   EXPECT_TRUE(gbt_model->CheckStructure(
-      decision_tree::CheckStructureOptions::GlobalImuptation()));
+      decision_tree::CheckStructureOptions::GlobalImputation()));
 }
 
 // Train and test a model on the adult dataset.

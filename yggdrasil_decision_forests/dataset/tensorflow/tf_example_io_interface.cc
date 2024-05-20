@@ -289,7 +289,7 @@ absl::Status TFExampleReaderToDataSpecCreator::InferColumnsAndTypes(
 
     // Check if we have seen enough records to determine all the types.
     if (guide.max_num_scanned_rows_to_guess_type() > 0 &&
-        nrow > guide.max_num_scanned_rows_to_guess_type()) {
+        nrow >= guide.max_num_scanned_rows_to_guess_type()) {
       YDF_LOG(INFO)
           << "Stop scanning the dataset to infer the type. Some records "
              "were not considered.";
@@ -338,9 +338,7 @@ absl::Status TFExampleReaderToDataSpecCreator::InferColumnsAndTypes(
       // Update the type of the column.
       int num_sub_values;
       auto new_type =
-          InferType(guide, feature.second,
-                    guide.default_column_guide().tokenizer().tokenizer(),
-                    column->type(), &num_sub_values);
+          InferType(guide, feature.second, column->type(), &num_sub_values);
       column->set_type(new_type);
       // Minimum and maximum number of values (for multi dimensional columns).
       if (column->multi_values().has_max_observed_size()) {
@@ -361,7 +359,7 @@ absl::Status TFExampleReaderToDataSpecCreator::InferColumnsAndTypes(
   RETURN_IF_ERROR(
       UpdateColSpecsWithGuideInfo(tfe_feature_to_infer_type_info, data_spec));
 
-  // Sort the column by name.
+  // Sort the columns by name.
   std::sort(data_spec->mutable_columns()->begin(),
             data_spec->mutable_columns()->end(),
             [](const proto::Column& a, const proto::Column& b) {
@@ -382,7 +380,7 @@ absl::Status TFExampleReaderToDataSpecCreator::ComputeColumnStatistics(
   tensorflow::Example example;
   while (reader->Next(&example).value()) {
     if (guide.max_num_scanned_rows_to_accumulate_statistics() > 0 &&
-        nrow > guide.max_num_scanned_rows_to_accumulate_statistics()) {
+        nrow >= guide.max_num_scanned_rows_to_accumulate_statistics()) {
       break;
     }
     LOG_INFO_EVERY_N_SEC(30, _ << nrow << " row(s) processed");
@@ -413,7 +411,6 @@ absl::StatusOr<int64_t> TFExampleReaderToDataSpecCreator::CountExamples(
 // Returns the most
 ColumnType InferType(const proto::DataSpecificationGuide& guide,
                      const tensorflow::Feature& feature,
-                     const proto::Tokenizer& tokenizer,
                      const ColumnType previous_type, int* num_sub_values) {
   DCHECK(num_sub_values != nullptr);
   *num_sub_values = 0;

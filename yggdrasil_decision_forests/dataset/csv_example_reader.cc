@@ -208,7 +208,7 @@ absl::Status CsvDataSpecCreator::InferColumnsAndTypes(
       LOG_INFO_EVERY_N_SEC(30, _ << nrow << " row(s) processed");
       // Check if we have seen enough records to determine all the types.
       if (guide.max_num_scanned_rows_to_guess_type() > 0 &&
-          nrow > guide.max_num_scanned_rows_to_guess_type()) {
+          nrow >= guide.max_num_scanned_rows_to_guess_type()) {
         YDF_LOG(INFO)
             << "Stop scanning the csv file to infer the type. Some records "
                "were not considered.";
@@ -261,12 +261,9 @@ absl::Status CsvDataSpecCreator::ComputeColumnStatistics(
   std::vector<int> col_idx_to_field_idx;
   std::vector<std::string> csv_header;
   uint64_t nrow = 0;
+  const auto max_num_scanned_rows_to_accumulate_statistics =
+      guide.max_num_scanned_rows_to_accumulate_statistics();
   for (const auto& path : paths) {
-    if (guide.max_num_scanned_rows_to_accumulate_statistics() > 0 &&
-        nrow > guide.max_num_scanned_rows_to_accumulate_statistics()) {
-      break;
-    }
-
     // Open the csv file.
     auto csv_file = file::OpenInputFile(path).value();
     yggdrasil_decision_forests::utils::csv::Reader reader(csv_file.get());
@@ -292,7 +289,13 @@ absl::Status CsvDataSpecCreator::ComputeColumnStatistics(
                          " does not match the header of ", paths.front()));
       }
     }
+    bool scan_complete = false;
     while (reader.NextRow(&row).value()) {
+      if (max_num_scanned_rows_to_accumulate_statistics > 0 &&
+          nrow >= max_num_scanned_rows_to_accumulate_statistics) {
+        scan_complete = true;
+        break;
+      }
       LOG_INFO_EVERY_N_SEC(30, _ << nrow << " row(s) processed");
       // Check the number of fields.
       if (row->size() != csv_header.size()) {
@@ -306,6 +309,7 @@ absl::Status CsvDataSpecCreator::ComputeColumnStatistics(
                                                    data_spec, accumulator));
       nrow++;
     }
+    if (scan_complete) break;
   }
   data_spec->set_created_num_rows(nrow);
   return absl::OkStatus();
@@ -362,15 +366,17 @@ absl::StatusOr<proto::ColumnType> InferType(
   }
   // One dimension -> Multi dimensions.
   if (!IsMultiDimensional(type)) {
-    ASSIGN_OR_RETURN(const auto look_multi_dim,
-                     LooksMultiDimensional(value, tokenizer));
-    if (look_multi_dim) {
-      if (type == ColumnType::NUMERICAL || type == ColumnType::BOOLEAN ||
-          type == ColumnType::DISCRETIZED_NUMERICAL) {
-        type = ColumnType::NUMERICAL_SET;
-      }
-      if (type == ColumnType::CATEGORICAL) {
-        type = ColumnType::CATEGORICAL_SET;
+    if (guide.allow_tokenization_for_inference_as_categorical_set()) {
+      ASSIGN_OR_RETURN(const auto look_multi_dim,
+                       LooksMultiDimensional(value, tokenizer));
+      if (look_multi_dim) {
+        if (type == ColumnType::NUMERICAL || type == ColumnType::BOOLEAN ||
+            type == ColumnType::DISCRETIZED_NUMERICAL) {
+          type = ColumnType::NUMERICAL_SET;
+        }
+        if (type == ColumnType::CATEGORICAL) {
+          type = ColumnType::CATEGORICAL_SET;
+        }
       }
     }
   }

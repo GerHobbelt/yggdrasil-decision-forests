@@ -122,6 +122,17 @@ proto::DataSpecificationGuide ToyDatasetGuide3() {
   return guide;
 }
 
+proto::DataSpecificationGuide ToyDatasetGuide4() {
+  proto::DataSpecificationGuide guide = PARSE_TEST_PROTO(
+      R"pb(
+        default_column_guide { categorial { min_vocab_frequency: 1 } }
+        column_guides { column_name_pattern: "Num_2" }
+        column_guides { column_name_pattern: "Cat_1" }
+        ignore_columns_without_guides: true
+      )pb");
+  return guide;
+}
+
 proto::DataSpecificationGuide ToyDatasetGuideIgnoreColumn() {
   proto::DataSpecificationGuide guide = PARSE_TEST_PROTO(
       R"pb(
@@ -355,6 +366,84 @@ proto::DataSpecification ToyDatasetExpectedDataSpecGuide3() {
             original_num_unique_values: 2
             maximum_num_bins: 255
             min_obs_in_bins: 3
+          }
+        }
+      )pb");
+  return data_spec;
+}
+
+proto::DataSpecification ToyDatasetExpectedDataSpecGuide4() {
+  proto::DataSpecification data_spec = PARSE_TEST_PROTO(
+
+      R"pb(
+        created_num_rows: 2
+        columns {
+          type: NUMERICAL
+          name: "Num_2"
+          is_manual_type: false
+          numerical { mean: 2 min_value: 2 max_value: 2 standard_deviation: 0 }
+          count_nas: 1
+        }
+        columns {
+          type: CATEGORICAL
+          name: "Cat_1"
+          is_manual_type: false
+          categorical {
+            most_frequent_value: 1
+            number_of_unique_values: 3
+            min_value_count: 1
+            max_number_of_unique_values: 2000
+            is_already_integerized: false
+            items {
+              key: "<OOD>"
+              value { index: 0 count: 0 }
+            }
+            items {
+              key: "A"
+              value { index: 2 count: 1 }
+            }
+            items {
+              key: "B"
+              value { index: 1 count: 1 }
+            }
+          }
+        }
+      )pb");
+  return data_spec;
+}
+
+proto::DataSpecification ToyDatasetExpectedDataSpecGuide4FirstRowType() {
+  proto::DataSpecification data_spec = PARSE_TEST_PROTO(
+
+      R"pb(
+        created_num_rows: 4
+        columns { name: "Num_2" is_manual_type: false count_nas: 2 }
+        columns {
+          type: CATEGORICAL
+          name: "Cat_1"
+          is_manual_type: false
+          categorical {
+            most_frequent_value: 1
+            number_of_unique_values: 4
+            min_value_count: 1
+            max_number_of_unique_values: 2000
+            is_already_integerized: false
+            items {
+              key: "<OOD>"
+              value { index: 0 count: 0 }
+            }
+            items {
+              key: "A"
+              value { index: 1 count: 2 }
+            }
+            items {
+              key: "C"
+              value { index: 2 count: 1 }
+            }
+            items {
+              key: "B"
+              value { index: 3 count: 1 }
+            }
           }
         }
       )pb");
@@ -603,6 +692,24 @@ TEST(Dataset, CreateLocalDataSpecFromCsvGuide1) {
   EXPECT_THAT(data_spec, ApproximatelyEqualsProto(target));
 }
 
+TEST(Dataset, CreateLocalDataSpecFromCsvGuideWithMaxNumStatistics) {
+  auto guide = ToyDatasetGuide4();
+  guide.set_max_num_scanned_rows_to_accumulate_statistics(2);
+  proto::DataSpecification data_spec;
+  CreateDataSpec(ToyDatasetTypedPathCsv(), false, guide, &data_spec);
+  auto target = ToyDatasetExpectedDataSpecGuide4();
+  EXPECT_THAT(data_spec, ApproximatelyEqualsProto(target));
+}
+
+TEST(Dataset, CreateLocalDataSpecFromCsvGuideWithMaxNumType) {
+  auto guide = ToyDatasetGuide4();
+  guide.set_max_num_scanned_rows_to_guess_type(1);
+  proto::DataSpecification data_spec;
+  CreateDataSpec(ToyDatasetTypedPathCsv(), false, guide, &data_spec);
+  auto target = ToyDatasetExpectedDataSpecGuide4FirstRowType();
+  EXPECT_THAT(data_spec, ApproximatelyEqualsProto(target));
+}
+
 TEST(Dataset, CreateLocalDataSpecFromCsvAllHash) {
   proto::DataSpecificationGuide guide;
   auto* col_guide = guide.add_column_guides();
@@ -833,6 +940,103 @@ TEST(Dataset, OverrideMostFrequentItemFail2) {
   EXPECT_FALSE(CreateDataSpecWithStatus(ToyDatasetTypedPathCsv(), false, guide,
                                         &data_spec)
                    .ok());
+}
+
+TEST(Dataset, InferCatSetCSVWithExplicitType) {
+  proto::DataSpecificationGuide guide;
+  guide.set_allow_tokenization_for_inference_as_categorical_set(false);
+  auto* col_guide = guide.add_column_guides();
+  col_guide->set_column_name_pattern("^Cat_set_1$");
+  col_guide->set_type(proto::CATEGORICAL_SET);
+  col_guide->mutable_categorial()->set_min_vocab_frequency(1);
+  guide.set_ignore_columns_without_guides(true);
+  proto::DataSpecification data_spec;
+  CHECK_OK(CreateDataSpecWithStatus(ToyDatasetTypedPathCsv(), false, guide,
+                                    &data_spec));
+
+  EXPECT_THAT(data_spec,
+              EqualsProto(PARSE_TEST_PROTO_WITH_TYPE(proto::DataSpecification,
+                                                     R"(
+            columns {
+              type: CATEGORICAL_SET
+              name: "Cat_set_1"
+              is_manual_type: true
+              categorical {
+                most_frequent_value: 1
+                number_of_unique_values: 4
+                min_value_count: 1
+                max_number_of_unique_values: 2000
+                is_already_integerized: false
+                items {
+                  key: "<OOD>"
+                  value { index: 0 count: 0 }
+                }
+                items {
+                  key: "x"
+                  value { index: 1 count: 4 }
+                }
+                items {
+                  key: "y"
+                  value { index: 2 count: 3 }
+                }
+                items {
+                  key: "z"
+                  value { index: 3 count: 2 }
+                }
+              }
+            }
+            created_num_rows: 4
+          )")));
+}
+
+TEST(Dataset, InferCatSetCSVWithoutTokenization) {
+  proto::DataSpecificationGuide guide;
+  guide.set_allow_tokenization_for_inference_as_categorical_set(false);
+  auto* col_guide = guide.add_column_guides();
+  col_guide->set_column_name_pattern("^Cat_set_1$");
+  col_guide->mutable_categorial()->set_min_vocab_frequency(1);
+  guide.set_ignore_columns_without_guides(true);
+  proto::DataSpecification data_spec;
+  CHECK_OK(CreateDataSpecWithStatus(ToyDatasetTypedPathCsv(), false, guide,
+                                    &data_spec));
+
+  EXPECT_THAT(data_spec,
+              EqualsProto(PARSE_TEST_PROTO_WITH_TYPE(proto::DataSpecification,
+                                                     R"(
+            columns {
+              type: CATEGORICAL
+              name: "Cat_set_1"
+              is_manual_type: false
+              categorical {
+                most_frequent_value: 1
+                number_of_unique_values: 5
+                min_value_count: 1
+                max_number_of_unique_values: 2000
+                is_already_integerized: false
+                items {
+                  key: "<OOD>"
+                  value { index: 0 count: 0 }
+                }
+                items {
+                  key: "X"
+                  value { index: 4 count: 1 }
+                }
+                items {
+                  key: "X Y Z"
+                  value { index: 2 count: 1 }
+                }
+                items {
+                  key: "Y X Z"
+                  value { index: 1 count: 1 }
+                }
+                items {
+                  key: "X Y"
+                  value { index: 3 count: 1}
+                }
+              }
+            }
+            created_num_rows: 4
+          )")));
 }
 
 }  // namespace

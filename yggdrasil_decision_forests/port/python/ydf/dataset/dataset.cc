@@ -33,19 +33,20 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
-#include "absl/strings/match.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
 #include "absl/types/optional.h"
 #include "absl/types/span.h"
-#include "pybind11_protobuf/native_proto_caster.h"  // IWYU pargma : keep
+#include "pybind11_protobuf/native_proto_caster.h"  // IWYU pragma : keep
 #include "yggdrasil_decision_forests/dataset/data_spec.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/data_spec_inference.h"
 #include "yggdrasil_decision_forests/dataset/formats.h"
+#include "yggdrasil_decision_forests/dataset/formats.pb.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset_io.h"
+#include "ydf/utils/numpy_data.h"
 #include "ydf/utils/status_casters.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
@@ -66,43 +67,10 @@ using BooleanColumn =
     ::yggdrasil_decision_forests::dataset::VerticalDataset::BooleanColumn;
 using CategoricalColumn =
     ::yggdrasil_decision_forests::dataset::VerticalDataset::CategoricalColumn;
+using CategoricalSetColumn = ::yggdrasil_decision_forests::dataset::
+    VerticalDataset::CategoricalSetColumn;
 using HashColumn =
     ::yggdrasil_decision_forests::dataset::VerticalDataset::HashColumn;
-
-// A collection of values, somehow similar to a "Span<const float>", but with a
-// stride (i.e., items are evenly spaced, but possibly with a constant gap).
-// Only support what is needed in this file.
-//
-// "StridedSpanFloat32" does not own the underlying data and relies on the data
-// in "data". The initialization "py::array_t data" object should not be
-// destroyed before "StridedSpanFloat32".
-class StridedSpanFloat32 {
- public:
-  // Build a "StridedSpanFloat32".
-  //
-  // Args:
-  //   data: A one dimentionnal array of float32 values.
-  StridedSpanFloat32(py::array_t<float>& data)
-      : item_stride_(data.strides(0) / data.itemsize()),
-        size_(static_cast<size_t>(data.shape(0))),
-        values_(data.data()) {
-    DCHECK_EQ(data.strides(0) % data.itemsize(), 0);
-  }
-
-  // Number of values.
-  size_t size() const { return size_; }
-
-  // Accesses to a value. "index" should be in [0, size).
-  float operator[](const size_t index) const {
-    DCHECK_LT(index, size_);
-    return values_[index * item_stride_];
-  }
-
- private:
-  const size_t item_stride_;
-  const size_t size_;
-  const float* const values_;
-};
 
 // Checks if all columns of the dataset have the same number of rows and sets
 // the dataset's number of rows accordingly. If requested, also modifies the
@@ -290,60 +258,6 @@ absl::Status PopulateColumnBooleanNPBool(dataset::VerticalDataset& self,
   return absl::OkStatus();
 }
 
-// Removes '\0' at the end of a string_view. Returns a string_view without the
-// zeroes.
-std::string_view remove_tailing_zeros(std::string_view src) {
-  int i = static_cast<int>(src.size()) - 1;
-  while (i >= 0 && src[i] == 0) {
-    i--;
-  }
-  return src.substr(0, i + 1);
-}
-
-// Non owning accessor to a np bytes array.
-struct NPByteArray {
-  // Wraps a single dimensional np::array of bytes.
-  static absl::StatusOr<NPByteArray> Create(const py::array& data) {
-    if (data.dtype().kind() != 'S') {
-      return absl::InternalError(
-          absl::StrCat("Expecting a np.bytes (i.e. |S) array. Got |",
-                       std::string(1, data.dtype().kind()), " instead"));
-    }
-    if (data.ndim() != 1) {
-      return absl::InternalError("Wrong shape");
-    }
-    py::buffer_info info = data.request();
-    return NPByteArray{
-        /*_data=*/(char*)info.ptr,
-        /*_stride=*/(size_t)info.strides[0],
-        /*_itemsize=*/(size_t)info.itemsize,
-        /*_size=*/(size_t)info.shape[0],
-    };
-  }
-
-  // Number of items.
-  size_t size() const { return _size; }
-
-  // Value accessor.
-  std::string_view operator[](size_t i) const {
-    return remove_tailing_zeros({_data + i * _stride, _itemsize});
-  }
-
-  // Extracts the content of the numpy array into a string vector.
-  std::vector<std::string> ToVector() const {
-    std::vector<std::string> dst(_size);
-    for (size_t i = 0; i < _size; i++) {
-      dst[i] = (*this)[i];
-    }
-    return dst;
-  }
-
-  const char* _data;
-  const size_t _stride;
-  const size_t _itemsize;
-  const size_t _size;
-};
-
 // A dictionary.
 // This structure holds the dictionary before it gets copied to the dataspec.
 struct Dictionary {
@@ -466,6 +380,7 @@ absl::StatusOr<Dictionary> DictionaryFromUserDictionary(
 absl::StatusOr<dataset::proto::Column> CreateCategoricalColumnSpec(
     const std::string& name, const NPByteArray& values,
     const int max_vocab_count, const int min_vocab_frequency,
+    const dataset::proto::ColumnType& column_type,
     const std::optional<py::array>& force_dictionary) {
   if (max_vocab_count < -1) {
     return absl::InvalidArgumentError(
@@ -499,8 +414,8 @@ absl::StatusOr<dataset::proto::Column> CreateCategoricalColumnSpec(
 
   // Create column spec
   dataset::proto::Column column;
+  column.set_type(column_type);
   column.set_name(name);
-  column.set_type(dataset::proto::ColumnType::CATEGORICAL);
   column.set_count_nas(values.size() - dictionary.num_valid_values);
 
   // Copy dictionary in proto
@@ -534,10 +449,10 @@ absl::Status PopulateColumnCategoricalNPBytes(
   ssize_t offset = 0;
   if (!column_idx.has_value()) {
     // Create column spec
-    ASSIGN_OR_RETURN(
-        const auto& column_spec,
-        CreateCategoricalColumnSpec(name, values, max_vocab_count,
-                                    min_vocab_frequency, dictionary));
+    ASSIGN_OR_RETURN(const auto& column_spec,
+                     CreateCategoricalColumnSpec(
+                         name, values, max_vocab_count, min_vocab_frequency,
+                         dataset::proto::CATEGORICAL, dictionary));
 
     // Import column data
     ASSIGN_OR_RETURN(auto* abstract_column, self.AddColumn(column_spec));
@@ -581,6 +496,81 @@ absl::Status PopulateColumnCategoricalNPBytes(
       }
     }
     dst_values[offset + value_idx] = dst_value;
+  }
+
+  return absl::OkStatus();
+}
+
+// Append contents of `data` to a categorical set column. If no `column_idx` is
+// not given, a new column is created.
+//
+// `data_bank` contains all the tokens. `data_boundaries` contains the left
+// boundaries of the individual sets.
+//
+// Note that this function only creates the columns and copies the data, but it
+// does not set `num_rows` on the dataset. Before using the dataset, `num_rows
+// has to be set (e.g. using SetAndCheckNumRows).
+absl::Status PopulateColumnCategoricalSetNPBytes(
+    dataset::VerticalDataset& self, const std::string& name,
+    py::array& data_bank, py::array_t<int64_t>& data_boundaries,
+    const int max_vocab_count, const int min_vocab_frequency,
+    std::optional<int> column_idx, const std::optional<py::array> dictionary) {
+  ASSIGN_OR_RETURN(const auto bank, NPByteArray::Create(data_bank));
+
+  CategoricalSetColumn* column;
+  if (!column_idx.has_value()) {
+    // Create column spec
+    ASSIGN_OR_RETURN(const auto& column_spec,
+                     CreateCategoricalColumnSpec(
+                         name, bank, max_vocab_count, min_vocab_frequency,
+                         dataset::proto::CATEGORICAL_SET, dictionary));
+
+    // Import column data
+    ASSIGN_OR_RETURN(auto* abstract_column, self.AddColumn(column_spec));
+    ASSIGN_OR_RETURN(
+        column, abstract_column->MutableCastWithStatus<CategoricalSetColumn>());
+    column_idx = self.ncol() - 1;
+  } else {
+    DCHECK_EQ(min_vocab_frequency, -1)
+        << "`min_vocab_frequency` is ignored as column " << name << " exists";
+    DCHECK_EQ(max_vocab_count, -1)
+        << "`max_vocab_count` is ignored as column " << name << " exists";
+    ASSIGN_OR_RETURN(column,
+                     self.MutableColumnWithCastWithStatus<CategoricalSetColumn>(
+                         column_idx.value()));
+  }
+  const auto& column_spec = self.data_spec().columns(column_idx.value());
+
+  // TODO: Check if using an absl::flat_map is significantly faster.
+  const auto& items = column_spec.categorical().items();
+
+  if (items.empty()) {
+    return absl::InvalidArgumentError(
+        "Empty categorical dictionary. PYDF does not support empty "
+        "dictionaries");
+  }
+
+  int bank_size = bank.size();
+  for (size_t boundary_idx = 0; boundary_idx < data_boundaries.size();
+       boundary_idx++) {
+    const auto left_boundary = data_boundaries.at(boundary_idx);
+    int right_boundary = bank_size;
+
+    if (boundary_idx + 1 < data_boundaries.size()) {
+      right_boundary = data_boundaries.at(boundary_idx + 1);
+    }
+    std::vector<int32_t> dst_values;
+    for (size_t value_idx = left_boundary; value_idx < right_boundary;
+         value_idx++) {
+      const auto value = bank[value_idx];
+      const auto it = items.find(value);
+      if (it == items.end()) {
+        dst_values.push_back(dataset::kOutOfDictionaryItemIndex);
+      } else {
+        dst_values.push_back(it->second.index());
+      }
+    }
+    column->Add(dst_values.begin(), dst_values.end());
   }
 
   return absl::OkStatus();
@@ -642,33 +632,33 @@ absl::Status CreateColumnsFromDataSpec(
 // Returns the raw contents of the dataset. To be used for testing/debugging
 // only.
 std::string DebugString(const dataset::VerticalDataset& self) {
-  std::string ds_as_string = "";
-  {
-    for (int col_idx = 0; col_idx < self.ncol(); col_idx++) {
-      if (col_idx > 0) {
-        absl::StrAppend(&ds_as_string, ",");
+  return self.DebugString(/*max_displayed_rows=*/{}, /*vertical=*/true,
+                          /*digit_precision=*/6);
+}
+
+// Print warning messages when reading from path.
+absl::Status CheckDataSpecForPathReading(
+    absl::string_view typed_path,
+    const dataset::proto::DataSpecification& data_spec) {
+  ASSIGN_OR_RETURN(auto path_and_type,
+                   dataset::GetDatasetPathAndTypeOrStatus(typed_path));
+  if (path_and_type.second == dataset::proto::FORMAT_CSV) {
+    bool tokenizer_warning_shown = false;
+    for (const auto& column : data_spec.columns()) {
+      if (!tokenizer_warning_shown &&
+          column.type() == dataset::proto::CATEGORICAL_SET) {
+        if (column.tokenizer().splitter() !=
+            dataset::proto::Tokenizer::NO_SPLITTING) {
+          YDF_LOG(INFO)
+              << "Column " << column.name()
+              << " has type CATEGORICAL_SET and will be tokenized. Set the "
+                 "column type to CATEGORICAL or deactivate the tokenizer in "
+                 "the data spec to prevent this.";
+        }
       }
-      absl::StrAppend(&ds_as_string, self.column(col_idx)->name());
     }
-    absl::StrAppend(&ds_as_string, "\n");
   }
-  // Body
-  for (dataset::VerticalDataset::row_t example_idx = 0;
-       example_idx < self.nrow(); example_idx++) {
-    for (int col_idx = 0; col_idx < self.ncol(); col_idx++) {
-      const auto& col_spec = self.data_spec().columns(col_idx);
-      if (col_idx > 0) {
-        absl::StrAppend(&ds_as_string, ",");
-      }
-      if (!self.column(col_idx)->IsNa(example_idx)) {
-        absl::StrAppend(&ds_as_string,
-                        self.column(col_idx)->ToStringWithDigitPrecision(
-                            example_idx, col_spec, /*digit_precision=*/6));
-      }
-    }
-    absl::StrAppend(&ds_as_string, "\n");
-  }
-  return ds_as_string;
+  return absl::OkStatus();
 }
 
 absl::Status CreateFromPathWithDataSpec(
@@ -676,8 +666,9 @@ absl::Status CreateFromPathWithDataSpec(
     const dataset::proto::DataSpecification& data_spec) {
   dataset::LoadConfig dataset_loading_config;
   // TODO: Should all columns be listed in the required columns?
-
   ASSIGN_OR_RETURN(const auto typed_path, dataset::GetTypedPath(path));
+
+  RETURN_IF_ERROR(CheckDataSpecForPathReading(typed_path, data_spec));
 
   RETURN_IF_ERROR(dataset::LoadVerticalDataset(
       typed_path, data_spec, &self,
@@ -747,7 +738,14 @@ void init_dataset(py::module_& m) {
            py::arg("data").noconvert(), py::arg("column_idx") = std::nullopt)
       .def("PopulateColumnHashNPBytes", WithStatus(PopulateColumnHashNPBytes),
            py::arg("name"), py::arg("data").noconvert(),
-           py::arg("column_idx") = std::nullopt);
+           py::arg("column_idx") = std::nullopt)
+      .def("PopulateColumnCategoricalSetNPBytes",
+           WithStatus(PopulateColumnCategoricalSetNPBytes), py::arg("name"),
+           py::arg("data_bank").noconvert(),
+           py::arg("data_boundaries").noconvert(),
+           py::arg("max_vocab_count") = -1, py::arg("min_vocab_frequency") = -1,
+           py::arg("column_idx") = std::nullopt,
+           py::arg("dictionary") = std::nullopt);
 }
 
 }  // namespace yggdrasil_decision_forests::port::python

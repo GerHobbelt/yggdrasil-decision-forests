@@ -381,6 +381,52 @@ Use `model.describe()` for more details
       evaluation_proto = self._model.Evaluate(ds._dataset, options_proto)  # pylint: disable=protected-access
     return metric.Evaluation(evaluation_proto)
 
+  def analyze_prediction(
+      self,
+      single_example: dataset.InputDataset,
+  ) -> analysis.PredictionAnalysis:
+    """Understands a single prediction of the model.
+
+    Note: To explain the model as a whole, use `model.analyze` instead.
+
+    Usage example:
+
+    ```python
+    import pandas as pd
+    import ydf
+
+    # Train model
+    train_ds = pd.read_csv("train.csv")
+    model = ydf.RandomForestLearner(label="label").Train(train_ds)
+
+    test_ds = pd.read_csv("test.csv")
+
+    # We want to explain the model prediction on the first test example.
+    selected_example = test_ds.iloc[:1]
+
+    analysis = model.analyze_prediction(selected_example, test_ds)
+
+    # Display the analysis in a notebook.
+    analysis
+    ```
+
+    Args:
+      single_example: Example to explain. Can be a dictionary of list or numpy
+        array of values, Pandas DataFrame, or a VerticalDataset.
+
+    Returns:
+      Prediction explanation.
+    """
+
+    with log.cc_log_context():
+      ds = dataset.create_vertical_dataset(
+          single_example, data_spec=self._model.data_spec()
+      )
+
+      options_proto = model_analysis_pb2.PredictionAnalysisOptions()
+      analysis_proto = self._model.AnalyzePrediction(ds._dataset, options_proto)  # pylint: disable=protected-access
+      return analysis.PredictionAnalysis(analysis_proto, options_proto)
+
   def analyze(
       self,
       data: dataset.InputDataset,
@@ -410,7 +456,7 @@ Use `model.describe()` for more details
     train_ds = pd.read_csv("train.csv")
     model = ydf.RandomForestLearner(label="label").Train(train_ds)
 
-    test_ds = pd.read_csv("train.csv")
+    test_ds = pd.read_csv("test.csv")
     analysis = model.analyze(test_ds)
 
     # Display the analysis in a notebook.
@@ -634,6 +680,33 @@ Use `model.describe()` for more details
           for src in importance_set.variable_importances
       ]
     return variable_importances
+
+  def label_col_idx(self) -> int:
+    return self._model.label_col_idx()
+
+  def label_classes(self) -> List[str]:
+    """Returns the label classes for classification tasks, None otherwise."""
+    if self.task() != Task.CLASSIFICATION:
+      raise ValueError(
+          "Label classes are only available for classification models. This"
+          f" model has type {self.task().name}"
+      )
+    label_column = self.data_spec().columns[self._model.label_col_idx()]
+    if label_column.type != data_spec_pb2.CATEGORICAL:
+      semantic = dataspec.Semantic.from_proto_type(label_column.type)
+      raise ValueError(
+          "Categorical type expected for classification label."
+          f" Got {semantic} instead."
+      )
+
+    if label_column.categorical.is_already_integerized:
+      log.info(
+          "The label column is integerized. This is expected for models trained"
+          " with TensorFlow Decision Forests."
+      )
+
+    # The first element is the "out-of-vocabulary" that is not used in labels.
+    return dataspec.categorical_column_dictionary_to_list(label_column)[1:]
 
 
 ModelType = TypeVar("ModelType", bound=GenericModel)

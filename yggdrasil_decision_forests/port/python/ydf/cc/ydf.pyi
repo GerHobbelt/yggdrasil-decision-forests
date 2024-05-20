@@ -1,7 +1,4 @@
-from typing import Optional, TypeVar, List, Union
-
-# pylint: disable=g-wrong-blank-lines
-from typing import Dict
+from typing import Dict, List, Optional, TypeVar, Union
 
 import numpy as np
 import numpy.typing as npt
@@ -11,8 +8,10 @@ from google3.third_party.yggdrasil_decision_forests.learner import abstract_lear
 from google3.third_party.yggdrasil_decision_forests.metric import metric_pb2
 from google3.third_party.yggdrasil_decision_forests.model import abstract_model_pb2
 from google3.third_party.yggdrasil_decision_forests.model import hyperparameter_pb2
-from google3.third_party.yggdrasil_decision_forests.utils import model_analysis_pb2
 from google3.third_party.yggdrasil_decision_forests.utils import fold_generator_pb2
+from google3.third_party.yggdrasil_decision_forests.utils import model_analysis_pb2
+
+# pylint: disable=g-wrong-blank-lines
 
 # Dataset bindings
 # ================
@@ -30,6 +29,16 @@ class VerticalDataset:
       self,
       name: str,
       data: npt.NDArray[np.bytes_],
+      max_vocab_count: int = -1,
+      min_vocab_frequency: int = -1,
+      column_idx: Optional[int] = None,
+      dictionary: Optional[npt.NDArray[np.bytes_]] = None,
+  ) -> None: ...
+  def PopulateColumnCategoricalSetNPBytes(
+      self,
+      name: str,
+      data_bank: npt.NDArray[np.bytes_],
+      data_boundaries: npt.NDArray[np.int64],
       max_vocab_count: int = -1,
       min_vocab_frequency: int = -1,
       column_idx: Optional[int] = None,
@@ -96,6 +105,11 @@ class GenericCCModel:
       dataset: VerticalDataset,
       options: model_analysis_pb2.Options,
   ) -> model_analysis_pb2.StandaloneAnalysisResult: ...
+  def AnalyzePrediction(
+      self,
+      example: VerticalDataset,
+      options: model_analysis_pb2.PredictionAnalysisOptions,
+  ) -> model_analysis_pb2.PredictionAnalysisResult: ...
   def name(self) -> str: ...
   def task(self) -> abstract_model_pb2.Task: ...
   def data_spec(self) -> data_spec_pb2.DataSpecification: ...
@@ -104,6 +118,7 @@ class GenericCCModel:
   ) -> None: ...
   def metadata(self) -> abstract_model_pb2.Metadata: ...
   def set_metadata(self, metadata: abstract_model_pb2.Metadata) -> None: ...
+  def label_col_idx(self) -> int: ...
   def Save(self, directory: str, file_prefix: Optional[str]): ...
   def Describe(self, full_details: bool, text_format: bool) -> str: ...
   def input_features(self) -> List[int]: ...
@@ -150,6 +165,10 @@ def LoadModel(directory: str, file_prefix: Optional[str]) -> ModelCCType: ...
 def ModelAnalysisCreateHtmlReport(
     analysis: model_analysis_pb2.StandaloneAnalysisResult,
     options: model_analysis_pb2.Options,
+) -> str: ...
+def PredictionAnalysisCreateHtmlReport(
+    analysis: model_analysis_pb2.PredictionAnalysisResult,
+    options: model_analysis_pb2.PredictionAnalysisOptions,
 ) -> str: ...
 
 

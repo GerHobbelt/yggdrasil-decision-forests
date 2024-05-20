@@ -60,8 +60,8 @@ class Semantic(enum.Enum):
       is computed with Google's farmhash and stored as an uint64.
     CATEGORICAL_SET: Set of categorical values. Great to represent tokenized
       texts. Can be a string. Unlike CATEGORICAL, the number of items in a
-      CATEGORICAL_SET can change and the order/index of each item doesn"t
-      matter.
+      CATEGORICAL_SET can change between examples. The order of values inside a
+      feature values does not matter.
     BOOLEAN: Boolean value. Can be a float or an integer. Missing values are
       represented by math.nan.  If a numerical tensor contains multiple values,
       its size should be constant, and each dimension isthreaded independently
@@ -350,9 +350,18 @@ class DataSpecInferenceArgs:
   min_vocab_frequency: int
   discretize_numerical_columns: bool
   num_discretized_numerical_bins: int
+  max_num_scanned_rows_to_infer_semantic: int
+  max_num_scanned_rows_to_compute_statistics: int
 
   def to_proto_guide(self) -> ds_pb.DataSpecificationGuide:
-    """Creates a proto DataSpecGuide for these arguments."""
+    """Creates a proto DataSpecGuide for these arguments.
+
+    For consistency with in-memory datasets, the proto guide deactivates YDF's
+    tokenizer.
+
+    Returns:
+      A guide to be used for dataspec inference by C++ YDF.
+    """
     ignore_columns_without_guides = (
         False if self.columns is None else not self.include_all_columns
     )
@@ -368,15 +377,19 @@ class DataSpecInferenceArgs:
                 maximum_num_bins=self.num_discretized_numerical_bins
             ),
         ),
+        allow_tokenization_for_inference_as_categorical_set=False,
     )
     if self.columns is not None:
       for column_def in self.columns:
         column = Column.from_column_def(column_def)
         guide.column_guides.append(column.to_proto_column_guide())
 
-    # TODO: b/311609910 - Make it possible for the user to configure those.
-    guide.max_num_scanned_rows_to_guess_type = 10000
-    guide.max_num_scanned_rows_to_accumulate_statistics = 100000
+    guide.max_num_scanned_rows_to_guess_type = (
+        self.max_num_scanned_rows_to_infer_semantic
+    )
+    guide.max_num_scanned_rows_to_accumulate_statistics = (
+        self.max_num_scanned_rows_to_compute_statistics
+    )
     return guide
 
 
