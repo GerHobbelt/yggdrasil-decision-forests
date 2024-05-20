@@ -30,14 +30,19 @@ included for reference only. The actual wrappers are re-generated during
 compilation.
 """
 
-from typing import Dict, Optional, Sequence
+from typing import Dict, Optional, Sequence, Union
 
 from yggdrasil_decision_forests.dataset import data_spec_pb2
 from yggdrasil_decision_forests.learner import abstract_learner_pb2
+from ydf.dataset import dataset
 from ydf.dataset import dataspec
+from ydf.learner import custom_loss
 from ydf.learner import generic_learner
 from ydf.learner import hyperparameters
 from ydf.learner import tuner as tuner_lib
+from ydf.model import generic_model
+from ydf.model.gradient_boosted_trees_model import gradient_boosted_trees_model
+from ydf.model.random_forest_model import random_forest_model
 
 
 class RandomForestLearner(generic_learner.GenericLearner):
@@ -220,7 +225,8 @@ class RandomForestLearner(generic_learner.GenericLearner):
       model interpretation as well as hyper parameter tuning. This can take lots
       of space, sometimes accounting for half of the model size. Default: True.
     max_depth: Maximum depth of the tree. `max_depth=1` means that all trees
-      will be roots. Negative values are ignored. Default: 16.
+      will be roots. `max_depth=-1` means that tree depth is not restricted by
+      this parameter. Values <= -2 will be ignored. Default: 16.
     max_num_nodes: Maximum number of nodes in the tree. Set to -1 to disable
       this limit. Only available for `growing_strategy=BEST_FIRST_GLOBAL`.
       Default: None.
@@ -420,6 +426,7 @@ class RandomForestLearner(generic_learner.GenericLearner):
       tuner: Optional[tuner_lib.AbstractTuner] = None,
       workers: Optional[Sequence[str]] = None,
   ):
+
     hyper_parameters = {
         "adapt_bootstrap_size_ratio_for_maximum_training_duration": (
             adapt_bootstrap_size_ratio_for_maximum_training_duration
@@ -509,6 +516,46 @@ class RandomForestLearner(generic_learner.GenericLearner):
         deployment_config=deployment_config,
         tuner=tuner,
     )
+
+  def train(
+      self,
+      ds: dataset.InputDataset,
+      valid: Optional[dataset.InputDataset] = None,
+  ) -> random_forest_model.RandomForestModel:
+    """Trains a model on the given dataset.
+
+    Options for dataset reading are given on the learner. Consult the
+    documentation of the learner or ydf.create_vertical_dataset() for additional
+    information on dataset reading in YDF.
+
+    Usage example:
+
+    ```
+    import ydf
+    import pandas as pd
+
+    train_ds = pd.read_csv(...)
+
+    learner = ydf.RandomForestLearner(label="label")
+    model = learner.train(train_ds)
+    print(model.summary())
+    ```
+
+    If training is interrupted (for example, by interrupting the cell execution
+    in Colab), the model will be returned to the state it was in at the moment
+    of interruption.
+
+    Args:
+      ds: Training dataset.
+      valid: Optional validation dataset. Some learners, such as Random Forest,
+        do not need validation dataset. Some learners, such as
+        GradientBoostedTrees, automatically extract a validation dataset from
+        the training dataset if the validation dataset is not provided.
+
+    Returns:
+      A trained model.
+    """
+    return super().train(ds, valid)
 
   @classmethod
   def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
@@ -728,6 +775,7 @@ class HyperparameterOptimizerLearner(generic_learner.GenericLearner):
       tuner: Optional[tuner_lib.AbstractTuner] = None,
       workers: Optional[Sequence[str]] = None,
   ):
+
     hyper_parameters = {
         "maximum_model_size_in_memory_in_bytes": (
             maximum_model_size_in_memory_in_bytes
@@ -769,6 +817,46 @@ class HyperparameterOptimizerLearner(generic_learner.GenericLearner):
         deployment_config=deployment_config,
         tuner=tuner,
     )
+
+  def train(
+      self,
+      ds: dataset.InputDataset,
+      valid: Optional[dataset.InputDataset] = None,
+  ) -> generic_model.GenericModel:
+    """Trains a model on the given dataset.
+
+    Options for dataset reading are given on the learner. Consult the
+    documentation of the learner or ydf.create_vertical_dataset() for additional
+    information on dataset reading in YDF.
+
+    Usage example:
+
+    ```
+    import ydf
+    import pandas as pd
+
+    train_ds = pd.read_csv(...)
+
+    learner = ydf.HyperparameterOptimizerLearner(label="label")
+    model = learner.train(train_ds)
+    print(model.summary())
+    ```
+
+    If training is interrupted (for example, by interrupting the cell execution
+    in Colab), the model will be returned to the state it was in at the moment
+    of interruption.
+
+    Args:
+      ds: Training dataset.
+      valid: Optional validation dataset. Some learners, such as Random Forest,
+        do not need validation dataset. Some learners, such as
+        GradientBoostedTrees, automatically extract a validation dataset from
+        the training dataset if the validation dataset is not provided.
+
+    Returns:
+      A trained model.
+    """
+    return super().train(ds, valid)
 
   @classmethod
   def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
@@ -934,12 +1022,15 @@ class GradientBoostedTreesLearner(generic_learner.GenericLearner):
     dart_dropout: Dropout rate applied when using the DART i.e. when
       forest_extraction=DART. Default: 0.01.
     early_stopping: Early stopping detects the overfitting of the model and
-      halts it training using the validation dataset controlled by
-      `validation_ratio`. - `NONE`: No early stopping. The model is trained
-      entirely. - `MIN_LOSS_FINAL`: No early stopping. However, the model is
-      then truncated to minimize the validation loss. - `LOSS_INCREASE`: Stop
-      the training when the validation does not decrease for
-      `early_stopping_num_trees_look_ahead` trees. Default: "LOSS_INCREASE".
+      halts it training using the validation dataset. If not provided directly,
+      the validation dataset is extracted from the training dataset (see
+      "validation_ratio" parameter): - `NONE`: No early stopping. All the
+      num_trees are trained and kept. - `MIN_LOSS_FINAL`: All the num_trees are
+      trained. The model is then truncated to minimize the validation loss i.e.
+      some of the trees are discarded as to minimum the validation loss. -
+      `LOSS_INCREASE`: Classical early stopping. Stop the training when the
+      validation does not decrease for `early_stopping_num_trees_look_ahead`
+      trees. Default: "LOSS_INCREASE".
     early_stopping_initial_iteration: 0-based index of the first iteration
       considered for early stopping computation. Increasing this value prevents
       too early stopping due to noisy initial iterations of the learner.
@@ -1021,10 +1112,17 @@ class GradientBoostedTreesLearner(generic_learner.GenericLearner):
       regression. - `MULTINOMIAL_LOG_LIKELIHOOD`: Multinomial log likelihood
       i.e. cross-entropy. Only valid for binary or multi-class classification. -
       `LAMBDA_MART_NDCG5`: LambdaMART with NDCG5. - `XE_NDCG_MART`:  Cross
-      Entropy Loss NDCG. See arxiv.org/abs/1911.09798.
+      Entropy Loss NDCG. See arxiv.org/abs/1911.09798. - `BINARY_FOCAL_LOSS`:
+      Focal loss. Only valid for binary classification. See
+      https://arxiv.org/pdf/1708.02002.pdf. - `POISSON`: Poisson log likelihood.
+        Only valid for regression. - `MEAN_AVERAGE_ERROR`: Mean average error
+        a.k.a. MAE. For custom losses, pass the loss object here. Note that when
+        using custom losses, the link function is deactivated (aka
+        apply_link_function is always False).
         Default: "DEFAULT".
     max_depth: Maximum depth of the tree. `max_depth=1` means that all trees
-      will be roots. Negative values are ignored. Default: 6.
+      will be roots. `max_depth=-1` means that tree depth is not restricted by
+      this parameter. Values <= -2 will be ignored. Default: 6.
     max_num_nodes: Maximum number of nodes in the tree. Set to -1 to disable
       this limit. Only available for `growing_strategy=BEST_FIRST_GLOBAL`.
       Default: None.
@@ -1145,8 +1243,14 @@ class GradientBoostedTreesLearner(generic_learner.GenericLearner):
       "validation_interval_in_trees" trees. Increasing this value reduce the
       cost of validation and can impact the early stopping policy (as early
       stopping is only tested during the validation). Default: 1.
-    validation_ratio: Ratio of the training dataset used to monitor the
-      training. Require to be >0 if early stopping is enabled. Default: 0.1.
+    validation_ratio: Fraction of the training dataset used for validation if
+      not validation dataset is provided. The validation dataset, whether
+      provided directly or extracted from the training dataset, is used to
+      compute the validation loss, other validation metrics, and possibly
+      trigger early stopping (if enabled). When early stopping is disabled, the
+      validation dataset is only used for monitoring and does not influence the
+      model directly. If the "validation_ratio" is set to 0, early stopping is
+      disabled (i.e., it implies setting early_stopping=NONE). Default: 0.1.
     num_threads: Number of threads used to train the model. Different learning
       algorithms use multi-threading differently and with different degree of
       efficiency. If `None`, `num_threads` will be automatically set to the
@@ -1221,7 +1325,7 @@ class GradientBoostedTreesLearner(generic_learner.GenericLearner):
       l2_categorical_regularization: Optional[float] = 1.0,
       l2_regularization: Optional[float] = 0.0,
       lambda_loss: Optional[float] = 1.0,
-      loss: Optional[str] = "DEFAULT",
+      loss: Optional[Union[str, custom_loss.AbstractCustomLoss]] = "DEFAULT",
       max_depth: Optional[int] = 6,
       max_num_nodes: Optional[int] = None,
       maximum_model_size_in_memory_in_bytes: Optional[float] = -1.0,
@@ -1255,6 +1359,7 @@ class GradientBoostedTreesLearner(generic_learner.GenericLearner):
       tuner: Optional[tuner_lib.AbstractTuner] = None,
       workers: Optional[Sequence[str]] = None,
   ):
+
     hyper_parameters = {
         "adapt_subsample_for_maximum_training_duration": (
             adapt_subsample_for_maximum_training_duration
@@ -1362,6 +1467,46 @@ class GradientBoostedTreesLearner(generic_learner.GenericLearner):
         deployment_config=deployment_config,
         tuner=tuner,
     )
+
+  def train(
+      self,
+      ds: dataset.InputDataset,
+      valid: Optional[dataset.InputDataset] = None,
+  ) -> gradient_boosted_trees_model.GradientBoostedTreesModel:
+    """Trains a model on the given dataset.
+
+    Options for dataset reading are given on the learner. Consult the
+    documentation of the learner or ydf.create_vertical_dataset() for additional
+    information on dataset reading in YDF.
+
+    Usage example:
+
+    ```
+    import ydf
+    import pandas as pd
+
+    train_ds = pd.read_csv(...)
+
+    learner = ydf.GradientBoostedTreesLearner(label="label")
+    model = learner.train(train_ds)
+    print(model.summary())
+    ```
+
+    If training is interrupted (for example, by interrupting the cell execution
+    in Colab), the model will be returned to the state it was in at the moment
+    of interruption.
+
+    Args:
+      ds: Training dataset.
+      valid: Optional validation dataset. Some learners, such as Random Forest,
+        do not need validation dataset. Some learners, such as
+        GradientBoostedTrees, automatically extract a validation dataset from
+        the training dataset if the validation dataset is not provided.
+
+    Returns:
+      A trained model.
+    """
+    return super().train(ds, valid)
 
   @classmethod
   def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
@@ -1523,7 +1668,8 @@ class DistributedGradientBoostedTreesLearner(generic_learner.GenericLearner):
       "max_unique_values_for_discretized_numerical" bins. This parameter will
       impact the model training. Default: False.
     max_depth: Maximum depth of the tree. `max_depth=1` means that all trees
-      will be roots. Negative values are ignored. Default: 6.
+      will be roots. `max_depth=-1` means that tree depth is not restricted by
+      this parameter. Values <= -2 will be ignored. Default: 6.
     max_unique_values_for_discretized_numerical: Maximum number of unique value
       of a numerical feature to allow its pre-discretization. In case of large
       datasets, discretized numerical features with a small number of unique
@@ -1639,6 +1785,7 @@ class DistributedGradientBoostedTreesLearner(generic_learner.GenericLearner):
       tuner: Optional[tuner_lib.AbstractTuner] = None,
       workers: Optional[Sequence[str]] = None,
   ):
+
     hyper_parameters = {
         "apply_link_function": apply_link_function,
         "force_numerical_discretization": force_numerical_discretization,
@@ -1693,6 +1840,46 @@ class DistributedGradientBoostedTreesLearner(generic_learner.GenericLearner):
         deployment_config=deployment_config,
         tuner=tuner,
     )
+
+  def train(
+      self,
+      ds: dataset.InputDataset,
+      valid: Optional[dataset.InputDataset] = None,
+  ) -> gradient_boosted_trees_model.GradientBoostedTreesModel:
+    """Trains a model on the given dataset.
+
+    Options for dataset reading are given on the learner. Consult the
+    documentation of the learner or ydf.create_vertical_dataset() for additional
+    information on dataset reading in YDF.
+
+    Usage example:
+
+    ```
+    import ydf
+    import pandas as pd
+
+    train_ds = pd.read_csv(...)
+
+    learner = ydf.DistributedGradientBoostedTreesLearner(label="label")
+    model = learner.train(train_ds)
+    print(model.summary())
+    ```
+
+    If training is interrupted (for example, by interrupting the cell execution
+    in Colab), the model will be returned to the state it was in at the moment
+    of interruption.
+
+    Args:
+      ds: Training dataset.
+      valid: Optional validation dataset. Some learners, such as Random Forest,
+        do not need validation dataset. Some learners, such as
+        GradientBoostedTrees, automatically extract a validation dataset from
+        the training dataset if the validation dataset is not provided.
+
+    Returns:
+      A trained model.
+    """
+    return super().train(ds, valid)
 
   @classmethod
   def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
@@ -1873,7 +2060,8 @@ class CartLearner(generic_learner.GenericLearner):
       model interpretation as well as hyper parameter tuning. This can take lots
       of space, sometimes accounting for half of the model size. Default: True.
     max_depth: Maximum depth of the tree. `max_depth=1` means that all trees
-      will be roots. Negative values are ignored. Default: 16.
+      will be roots. `max_depth=-1` means that tree depth is not restricted by
+      this parameter. Values <= -2 will be ignored. Default: 16.
     max_num_nodes: Maximum number of nodes in the tree. Set to -1 to disable
       this limit. Only available for `growing_strategy=BEST_FIRST_GLOBAL`.
       Default: None.
@@ -2048,6 +2236,7 @@ class CartLearner(generic_learner.GenericLearner):
       tuner: Optional[tuner_lib.AbstractTuner] = None,
       workers: Optional[Sequence[str]] = None,
   ):
+
     hyper_parameters = {
         "allow_na_conditions": allow_na_conditions,
         "categorical_algorithm": categorical_algorithm,
@@ -2125,6 +2314,46 @@ class CartLearner(generic_learner.GenericLearner):
         deployment_config=deployment_config,
         tuner=tuner,
     )
+
+  def train(
+      self,
+      ds: dataset.InputDataset,
+      valid: Optional[dataset.InputDataset] = None,
+  ) -> random_forest_model.RandomForestModel:
+    """Trains a model on the given dataset.
+
+    Options for dataset reading are given on the learner. Consult the
+    documentation of the learner or ydf.create_vertical_dataset() for additional
+    information on dataset reading in YDF.
+
+    Usage example:
+
+    ```
+    import ydf
+    import pandas as pd
+
+    train_ds = pd.read_csv(...)
+
+    learner = ydf.CartLearner(label="label")
+    model = learner.train(train_ds)
+    print(model.summary())
+    ```
+
+    If training is interrupted (for example, by interrupting the cell execution
+    in Colab), the model will be returned to the state it was in at the moment
+    of interruption.
+
+    Args:
+      ds: Training dataset.
+      valid: Optional validation dataset. Some learners, such as Random Forest,
+        do not need validation dataset. Some learners, such as
+        GradientBoostedTrees, automatically extract a validation dataset from
+        the training dataset if the validation dataset is not provided.
+
+    Returns:
+      A trained model.
+    """
+    return super().train(ds, valid)
 
   @classmethod
   def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:

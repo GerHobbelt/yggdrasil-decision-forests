@@ -649,9 +649,10 @@ Use `model.describe()` for more details
       import tensorflow_decision_forests as tfdf  # type:ignore
     except ImportError as exc:
       raise ValueError(
-          "Exporting to tensorflow requires the tensorflow_decision_forests"
-          " package to be installed. When using pip, run `pip install"
-          " tensorflow_decision_forests`"
+          'Exporting to tensorflow requires the "tensorflow_decision_forests"'
+          " package to be installed. If using pip, run `pip install"
+          " tensorflow_decision_forests`. If using Bazel/Blaze, add a"
+          " dependency."
       ) from exc
     # Do not pass input_model_signature_fn if it is None.
     not_none_params = {}
@@ -783,6 +784,33 @@ Use `model.describe()` for more details
         )
         for column_idx in self._model.input_features()
     ]
+
+  def self_evaluation(self) -> metric.Evaluation:
+    """Returns the model's self-evaluation.
+
+    Different models use different methods for self-evaluation. Notably, Random
+    Forests use OOB evaluation and Gradient Boosted Trees use evaluation on the
+    validation dataset. Therefore, self-evaluations are not comparable between
+    different model types.
+
+    Usage example:
+
+    ```python
+    import pandas as pd
+    import ydf
+
+    # Train model
+    train_ds = pd.read_csv("train.csv")
+    model = ydf.GradientBoostedTreesLearner(label="label").train(train_ds)
+
+    self_evaluation = model.self_evaluation()
+    # In an interactive Python environment, print a rich evaluation report.
+    self_evaluation
+    ```
+    """
+    raise NotImplementedError(
+        "Self-evaluation is not available for this model type."
+    )
 
 
 ModelType = TypeVar("ModelType", bound=GenericModel)

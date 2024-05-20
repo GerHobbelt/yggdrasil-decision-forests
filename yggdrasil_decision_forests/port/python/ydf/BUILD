@@ -15,9 +15,9 @@ py_library(
     visibility = ["//visibility:public"],
     deps = [
         ":version",
-        # tensorflow_decision_forests dep,  # buildcleaner: keep
         "//ydf/dataset",
         "//ydf/dataset:dataspec",
+        "//ydf/learner:custom_loss_py",
         "//ydf/learner:generic_learner",
         "//ydf/learner:specialized_learners",
         "//ydf/learner:tuner",

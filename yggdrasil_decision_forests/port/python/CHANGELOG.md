@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.2.0 - 2024-02-22
+
+### Features
+
+-   Add support for custom losses for GBTs (Classification & Regression).
+
+### Fixes
+
+-   In the tuner, run `parallel_trials` trials in parallel, instead of
+    `num_threads` trials in parallel.
+-   Force validation dataset as path if training dataset is a path.
+-   Fix benchmark.
+-   Clarify error when using an incompatible dataset when ranking.
+-   Improve test coverage.
+-   Fix an issue with the conditions when building trees manually.
+
+### Documentation
+
+-   Add a migration guide TF-DF ==> YDF.
+-   Clarify max_depth parameter documentation.
+-   Clarify early stopping documentation.
+
+#### Release music
+
+Galop infernal d'Orphée aux Enfers. Jacques Offenbach
+
+## 0.1.0 - 2024-01-25
+
+### Features
+
+-   Added model validation evaluation (for GBTs) and OOB evaluation (for RFs).
+-   Expose winner-takes-all for Random Forests.
+-   Added model self evaluation.
+-   Added `ydf.from_tensorflow_decision_forests()` for importing TF-DF models.
+-   Allow feeding datasets as sequence of strings.
+
+### Fixes
+
+-   Fixes a plotting issue for GBTs without validation loss
+
+#### Release music
+
+Flötenuhren von 1772 und 1793 - Vivace (Hob XIX:13). Joseph Haydn
+
 ## 0.0.8 - 2023-12-19
 
 ### Features

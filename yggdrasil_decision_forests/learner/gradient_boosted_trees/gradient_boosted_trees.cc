@@ -55,7 +55,6 @@
 #include "yggdrasil_decision_forests/learner/gradient_boosted_trees/loss/loss_interface.h"
 #include "yggdrasil_decision_forests/learner/gradient_boosted_trees/loss/loss_library.h"
 #include "yggdrasil_decision_forests/learner/gradient_boosted_trees/loss/loss_utils.h"
-#include "yggdrasil_decision_forests/metric/ranking_ndcg.h"
 #include "yggdrasil_decision_forests/model/abstract_model.h"
 #include "yggdrasil_decision_forests/model/abstract_model.pb.h"
 #include "yggdrasil_decision_forests/model/decision_tree/decision_tree.h"
@@ -534,19 +533,16 @@ absl::Status GradientBoostedTreesLearner::BuildAllTrainingConfiguration(
                                      all_config->train_config_link,
                                      *all_config->gbt_config, deployment()));
 
-  auto* mutable_gbt_config = all_config->train_config.MutableExtension(
-      gradient_boosted_trees::proto::gradient_boosted_trees_config);
-
   // Select the loss function.
-  if (mutable_gbt_config->loss() == proto::Loss::DEFAULT) {
+  if (all_config->gbt_config->loss() == proto::Loss::DEFAULT) {
     ASSIGN_OR_RETURN(
         const auto default_loss,
         internal::DefaultLoss(
             all_config->train_config.task(),
             data_spec.columns(all_config->train_config_link.label())));
-    mutable_gbt_config->set_loss(default_loss);
+    all_config->gbt_config->set_loss(default_loss);
     YDF_LOG(INFO) << "Default loss set to "
-                  << proto::Loss_Name(mutable_gbt_config->loss());
+                  << proto::Loss_Name(all_config->gbt_config->loss());
   }
 
   ASSIGN_OR_RETURN(
@@ -554,7 +550,7 @@ absl::Status GradientBoostedTreesLearner::BuildAllTrainingConfiguration(
       CreateLoss(all_config->gbt_config->loss(),
                  all_config->train_config.task(),
                  data_spec.columns(all_config->train_config_link.label()),
-                 *all_config->gbt_config));
+                 *all_config->gbt_config, custom_loss_functions_));
 
   if (all_config->loss->RequireGroupingAttribute()) {
     if (!all_config->gbt_config->validation_set_group_feature().empty()) {
@@ -1226,12 +1222,13 @@ GradientBoostedTreesLearner::TrainWithStatus(
   // all the examples have the same weight. This triggers special handling for
   // improved performance.
   //
-  // This feature is not supported for GOSS (where weights are always used) and
-  // uplifting.
+  // This feature is not supported for GOSS (where weights are always used),
+  // uplifting and custom losses.
   bool use_optimized_unit_weights = true;
   if (config.gbt_config->has_gradient_one_side_sampling() ||
       config.train_config.task() == model::proto::CATEGORICAL_UPLIFT ||
-      config.train_config.task() == model::proto::NUMERICAL_UPLIFT) {
+      config.train_config.task() == model::proto::NUMERICAL_UPLIFT ||
+      custom_loss_functions_.index() != 0) {
     use_optimized_unit_weights = false;
   }
   RETURN_IF_ERROR(dataset::GetWeights(sub_train_dataset,
@@ -2322,7 +2319,7 @@ GradientBoostedTreesLearner::GetGenericHyperParameterSpecification() const {
     param.mutable_real()->set_default_value(gbt_config.validation_set_ratio());
     param.mutable_documentation()->set_proto_path(proto_path);
     param.mutable_documentation()->set_description(
-        R"(Ratio of the training dataset used to monitor the training. Require to be >0 if early stopping is enabled.)");
+        R"(Fraction of the training dataset used for validation if not validation dataset is provided. The validation dataset, whether provided directly or extracted from the training dataset, is used to compute the validation loss, other validation metrics, and possibly trigger early stopping (if enabled). When early stopping is disabled, the validation dataset is only used for monitoring and does not influence the model directly. If the "validation_ratio" is set to 0, early stopping is disabled (i.e., it implies setting early_stopping=NONE).)");
   }
 
   {
@@ -2369,10 +2366,10 @@ GradientBoostedTreesLearner::GetGenericHyperParameterSpecification() const {
         kHParamEarlyStoppingLossIncrease);
     param.mutable_documentation()->set_proto_path(proto_path);
     param.mutable_documentation()->set_description(
-        R"(Early stopping detects the overfitting of the model and halts it training using the validation dataset controlled by `validation_ratio`.
-- `NONE`: No early stopping. The model is trained entirely.
-- `MIN_LOSS_FINAL`: No early stopping. However, the model is then truncated to minimize the validation loss.
-- `LOSS_INCREASE`: Stop the training when the validation does not decrease for `early_stopping_num_trees_look_ahead` trees.)");
+        R"(Early stopping detects the overfitting of the model and halts it training using the validation dataset. If not provided directly, the validation dataset is extracted from the training dataset (see "validation_ratio" parameter):
+- `NONE`: No early stopping. All the num_trees are trained and kept.
+- `MIN_LOSS_FINAL`: All the num_trees are trained. The model is then truncated to minimize the validation loss i.e. some of the trees are discarded as to minimum the validation loss.
+- `LOSS_INCREASE`: Classical early stopping. Stop the training when the validation does not decrease for `early_stopping_num_trees_look_ahead` trees.)");
   }
 
   {
