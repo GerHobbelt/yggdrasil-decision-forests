@@ -20,7 +20,7 @@
 # Usage example:
 #   third_party/yggdrasil_decision_forests/tools/run_e2e_pydf_test.sh
 
-set -ex
+set -vex
 
 LOCAL_DIR="/usr/local/google/home/${USER}/git/yggdrasil-decision-forests"
 CL=$(hg exportedcl)
@@ -57,16 +57,27 @@ run_test() {
   sudo docker start ${DOCKER_CONTAINER}
   set -e
 
-  CMD='yum update;yum install -y rsync;curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64;chmod +x /usr/local/bin/bazel;PYTHON=python3.11;$PYTHON -m venv /tmp/venv_$PYTHON;source /tmp/venv_$PYTHON/bin/activate;export COMPILERS="gcc";./tools/test_pydf.sh;./tools/build_pydf.sh python;$SHELL'
+  # Install the build dependencies
+  CMD="yum update;yum install -y rsync;curl -L -o /usr/local/bin/bazel https://github.com/bazelbuild/bazelisk/releases/download/v1.19.0/bazelisk-linux-amd64;chmod +x /usr/local/bin/bazel;export COMPILERS=gcc"
 
-  # Only get a shell, uncomment the following line.
-  # CMD='$SHELL'
+  # Only start a shell
+  CMD="${CMD};/bin/bash"
 
-  # If the test fails, you can restart it with:
+  # Or, compile PYDF and give a shell
+  # CMD="${CMD};PYTHON=python3.11;\$PYTHON -m venv /tmp/venv_\$PYTHON;source /tmp/venv_\$PYTHON/bin/activate"
+  # CMD="${CMD};./tools/test_pydf.sh;./tools/build_pydf.sh python;/bin/bash"
+
+  # In the shell, you can:
+  #
+  # Build and run the units tests:
+  # PYTHON=python3.9;$PYTHON -m venv /tmp/venv_$PYTHON;source /tmp/venv_$PYTHON/bin/activate
   # ./tools/test_pydf.sh
   #
-  # To build a pip package, run:
+  # To build a pip package from the artefacts of the previous command:
   # ./tools/build_pydf.sh python
+  #
+  # Comile, test, and build the pip packages for all the python versions:
+  # ./tools/build_linux_release.sh
   #
   # To start a notebook instance, run:
   # ./tools/start_notebook.sh

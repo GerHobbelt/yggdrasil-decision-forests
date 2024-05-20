@@ -41,12 +41,13 @@ cc_binary(
         "-s EXIT_RUNTIME=0",
         "-s MALLOC=emmalloc",
         "-s MODULARIZE=1",
+        "-s EXPORT_ES6=0",
         "-s DYNAMIC_EXECUTION=0",
         "-s EXPORT_NAME=YggdrasilDecisionForests",
         "-s FILESYSTEM=1",  # Link filesystem (should be automatic in some cases).
         # "-s -g",  # Function names in stack trace.
         # "-s ASSERTIONS=2",  # Runtime checks for common memory allocation errors.
-        "-s DEMANGLE_SUPPORT=1",  # Better function name in stack stace.
+        # "-s DEMANGLE_SUPPORT=1",  # Better function name in stack stace.
         # fetchSettings is included to bypass CORS issues during development
         "-s INCOMING_MODULE_JS_API=onRuntimeInitialized,fetchSettings,print,printErr,locateFile",
         "--post-js yggdrasil_decision_forests/port/javascript/wrapper.js",

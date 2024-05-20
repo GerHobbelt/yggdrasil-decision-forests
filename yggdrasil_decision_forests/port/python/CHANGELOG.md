@@ -1,5 +1,39 @@
 # Changelog
 
+## HEAD
+
+### Feature
+
+-   Add `max_depth` argument to `model.print_tree`.
+
+### Fix
+
+-   Fix error when plotting oblique trees (`model.plot_tree`) in colab.
+
+## 0.4.3- 2024-05-07
+
+### Feature
+
+-   Add `model.to_jax_function()` function to convert a YDF model into a JAX
+    function that can be combined with other JAX operations.
+-   Print warnings when categorical features look like numbers.
+-   Add support for Python 3.12.
+
+### Fix
+
+-   Fix cross-validation for non-classification learners.
+-   Fix missing ydf/model/tree/plotter.js
+-   Solve dependency collision of YDF Proto between PYDF and TF-DF.
+
+## 0.4.2- 2024-04-22
+
+### Feature
+
+-   Show error message when TF-DF and YDF shared proto dependencies are
+    colliding.
+-   Add option to specify a validation dataset for the CartLearner.
+-   `DecisionForestsLearner` is an alias to `CartLearner`.
+
 ## 0.4.1- 2024-04-18
 
 ### Fix

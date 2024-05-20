@@ -84,11 +84,7 @@ pybind_library(
 
 py_library(
     name = "generic_model",
-    srcs = [
-        "export_jax.py",
-        "export_tf.py",
-        "generic_model.py",
-    ],
+    srcs = ["generic_model.py"],
     deps = [
         ":analysis",
         ":model_metadata",
@@ -96,7 +92,6 @@ py_library(
         ":template_cpp_export",
         # absl/logging dep,
         # numpy dep,
-        # tensorflow_decision_forests dep,
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "@ydf_cc//yggdrasil_decision_forests/metric:metric_py_proto",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_py_proto",
@@ -108,6 +103,36 @@ py_library(
         "//ydf/utils:html",
         "//ydf/utils:log",
         "@ydf_cc//yggdrasil_decision_forests/utils:model_analysis_py_proto",
+    ],
+)
+
+# Note: This build rule does not depends on TF. To use its functionalities, TF and TF-DF needs to be
+# imported manually by the call i.e. //third_party/py/tensorflow_decision_forests.
+py_library(
+    name = "export_tf",
+    srcs = ["export_tf.py"],
+    deps = [
+        ":generic_model",
+        "//ydf/dataset:dataspec",
+        "//ydf/dataset/io:dataset_io",
+        "//ydf/utils:log",
+        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
+    ],
+)
+
+# Note: This build rule does not depends on JAX. To use its functionalities, JAX needs to be
+# imported manually by the call i.e. //third_party/py/jax.
+py_library(
+    name = "export_jax",
+    srcs = ["export_jax.py"],
+    deps = [
+        ":generic_model",
+        "//ydf/dataset:dataspec",
+        "//ydf/learner:custom_loss_py",
+        "//ydf/model/decision_forest_model",
+        "//ydf/model/gradient_boosted_trees_model",
+        "//ydf/model/tree:all",
+        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
     ],
 )
 
@@ -165,6 +190,24 @@ py_library(
     ],
 )
 
+py_library(
+    name = "benchmark",
+    srcs = ["benchmark.py"],
+    deps = [
+        ":export_jax",  # buildcleaner: keep
+        ":export_tf",  # buildcleaner: keep
+        ":generic_model",
+        # jax dep,
+        # numpy dep,
+        # tensorflow:tensorflow_no_contrib dep,
+        # tensorflow_decision_forests dep,
+        # ydf dep,
+        "//ydf/dataset",
+        "//ydf/learner:specialized_learners",
+        "//ydf/utils:string_lib",
+    ],
+)
+
 # Tests
 # =====
 
@@ -205,6 +248,7 @@ py_test(
     # TODO: This test fails in OSS due to a package name clash on yggdrasil_decision_forests.
     tags = ["manual"],
     deps = [
+        ":export_tf",
         ":generic_model",
         ":model_lib",
         # absl/logging dep,
@@ -287,14 +331,32 @@ py_test(
     ],
     python_version = "PY3",
     deps = [
+        ":export_jax",
         ":generic_model",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         # jax dep,
+        # jax/experimental/jax2tf dep,
+        # matplotlib dep,
         # numpy dep,
+        # optax dep,
+        # tensorflow dep,
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "//ydf/dataset:dataspec",
         "//ydf/learner:generic_learner",
         "//ydf/learner:specialized_learners",
+        "//ydf/model/tree:all",
+    ],
+)
+
+py_test(
+    name = "benchmark_test",
+    srcs = ["benchmark_test.py"],
+    python_version = "PY3",
+    deps = [
+        ":benchmark",
+        # absl/testing:absltest dep,
+        # absl/testing:parameterized dep,
+        # numpy dep,
     ],
 )

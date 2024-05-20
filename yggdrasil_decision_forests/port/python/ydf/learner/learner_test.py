@@ -16,7 +16,7 @@
 
 import os
 import signal
-from typing import Tuple
+from typing import Any, Optional, Tuple
 
 from absl import logging
 from absl.testing import absltest
@@ -25,7 +25,6 @@ import numpy as np
 import numpy.testing as npt
 import pandas as pd
 
-from yggdrasil_decision_forests.dataset import data_spec_pb2
 from yggdrasil_decision_forests.dataset import data_spec_pb2 as ds_pb
 from yggdrasil_decision_forests.learner import abstract_learner_pb2
 from yggdrasil_decision_forests.model import abstract_model_pb2
@@ -73,6 +72,7 @@ class LearnerTest(parameterized.TestCase):
       learner: generic_learner.GenericLearner,
       minimum_accuracy: float,
       check_serialization: bool = True,
+      valid: Optional[Any] = None,
   ) -> Tuple[generic_model.GenericModel, metric.Evaluation, np.ndarray]:
     """Runs a battery of test on a model compatible with the adult dataset.
 
@@ -92,7 +92,7 @@ class LearnerTest(parameterized.TestCase):
       The model, its evaluation and the predictions on the test dataset.
     """
     # Train the model.
-    model = learner.train(self.adult.train)
+    model = learner.train(self.adult.train, valid=valid)
 
     # Evaluate the trained model.
     evaluation = model.evaluate(self.adult.test)
@@ -218,7 +218,7 @@ class RandomForestLearnerTest(LearnerTest):
         "adult_test_binary_class_rf.csv",
     )
     predictions_df = pd.read_csv(predictions_path)
-    data_spec = data_spec_pb2.DataSpecification()
+    data_spec = ds_pb.DataSpecification()
     with open(data_spec_path, "rb") as f:
       data_spec.ParseFromString(f.read())
 
@@ -332,7 +332,7 @@ class RandomForestLearnerTest(LearnerTest):
     with self.assertRaises(ValueError):
       _ = learner.train(self.adult.train)
 
-  def test_cross_validation(self):
+  def test_cross_validation_classification(self):
     learner = specialized_learners.RandomForestLearner(
         label="income", num_trees=10
     )
@@ -344,6 +344,66 @@ class RandomForestLearnerTest(LearnerTest):
     # All the examples are used in the evaluation
     self.assertEqual(
         evaluation.num_examples, self.adult.train.data_spec().created_num_rows
+    )
+
+    with open(self.create_tempfile(), "w") as f:
+      f.write(evaluation._repr_html_())
+
+  def test_cross_validation_regression(self):
+    learner = specialized_learners.RandomForestLearner(
+        label="target", num_trees=10, task=generic_learner.Task.REGRESSION
+    )
+    evaluation = learner.cross_validation(
+        self.two_center_regression.train, folds=10, parallel_evaluations=2
+    )
+    logging.info("evaluation:\n%s", evaluation)
+    self.assertAlmostEqual(evaluation.rmse, 116, delta=1)
+    # All the examples are used in the evaluation
+    self.assertEqual(
+        evaluation.num_examples,
+        self.two_center_regression.train.data_spec().created_num_rows,
+    )
+
+    with open(self.create_tempfile(), "w") as f:
+      f.write(evaluation._repr_html_())
+
+  def test_cross_validation_uplift(self):
+    learner = specialized_learners.RandomForestLearner(
+        label="y",
+        uplift_treatment="treat",
+        num_trees=10,
+        task=generic_learner.Task.CATEGORICAL_UPLIFT,
+    )
+    evaluation = learner.cross_validation(
+        self.sim_pte.train, folds=10, parallel_evaluations=2
+    )
+    logging.info("evaluation:\n%s", evaluation)
+    self.assertAlmostEqual(evaluation.qini, 0.06893, delta=1)
+    # All the examples are used in the evaluation
+    self.assertEqual(
+        evaluation.num_examples, self.sim_pte.train.data_spec().created_num_rows
+    )
+
+    with open(self.create_tempfile(), "w") as f:
+      f.write(evaluation._repr_html_())
+
+  def test_cross_validation_ranking(self):
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label="LABEL",
+        ranking_group="GROUP",
+        task=generic_learner.Task.RANKING,
+        num_trees=10,
+    )
+    evaluation = learner.cross_validation(
+        self.synthetic_ranking.train, folds=10, parallel_evaluations=2
+    )
+    logging.info("evaluation:\n%s", evaluation)
+    self.assertGreaterEqual(evaluation.ndcg, 0.70)
+    self.assertLessEqual(evaluation.ndcg, 0.75)
+    # All the examples are used in the evaluation
+    self.assertEqual(
+        evaluation.num_examples,
+        self.synthetic_ranking.train.data_spec().created_num_rows,
     )
 
     with open(self.create_tempfile(), "w") as f:
@@ -436,15 +496,15 @@ class RandomForestLearnerTest(LearnerTest):
 
   def test_default_hp_dictionary(self):
     learner = specialized_learners.RandomForestLearner(label="l", num_trees=50)
-    self.assertDictContainsSubset(
+    self.assertLessEqual(
         {
             "num_trees": 50,
             "categorical_algorithm": "CART",
             "categorical_set_split_greedy_sampling": 0.1,
             "compute_oob_performances": True,
             "compute_oob_variable_importances": False,
-        },
-        learner.hyperparameters,
+        }.items(),
+        learner.hyperparameters.items(),
     )
 
   def test_multidimensional_training_dataset(self):
@@ -456,12 +516,12 @@ class RandomForestLearnerTest(LearnerTest):
     model = learner.train(data)
 
     expected_columns = [
-        data_spec_pb2.Column(
+        ds_pb.Column(
             name="feature.0_of_4",
-            type=data_spec_pb2.ColumnType.NUMERICAL,
+            type=ds_pb.ColumnType.NUMERICAL,
             dtype=ds_pb.DType.DTYPE_INT64,
             count_nas=0,
-            numerical=data_spec_pb2.NumericalSpec(
+            numerical=ds_pb.NumericalSpec(
                 mean=2,
                 standard_deviation=2,
                 min_value=0,
@@ -469,12 +529,12 @@ class RandomForestLearnerTest(LearnerTest):
             ),
             is_unstacked=True,
         ),
-        data_spec_pb2.Column(
+        ds_pb.Column(
             name="feature.1_of_4",
-            type=data_spec_pb2.ColumnType.NUMERICAL,
+            type=ds_pb.ColumnType.NUMERICAL,
             dtype=ds_pb.DType.DTYPE_INT64,
             count_nas=0,
-            numerical=data_spec_pb2.NumericalSpec(
+            numerical=ds_pb.NumericalSpec(
                 mean=3,
                 standard_deviation=2,
                 min_value=1,
@@ -482,12 +542,12 @@ class RandomForestLearnerTest(LearnerTest):
             ),
             is_unstacked=True,
         ),
-        data_spec_pb2.Column(
+        ds_pb.Column(
             name="feature.2_of_4",
-            type=data_spec_pb2.ColumnType.NUMERICAL,
+            type=ds_pb.ColumnType.NUMERICAL,
             dtype=ds_pb.DType.DTYPE_INT64,
             count_nas=0,
-            numerical=data_spec_pb2.NumericalSpec(
+            numerical=ds_pb.NumericalSpec(
                 mean=4,
                 standard_deviation=2,
                 min_value=2,
@@ -495,12 +555,12 @@ class RandomForestLearnerTest(LearnerTest):
             ),
             is_unstacked=True,
         ),
-        data_spec_pb2.Column(
+        ds_pb.Column(
             name="feature.3_of_4",
-            type=data_spec_pb2.ColumnType.NUMERICAL,
+            type=ds_pb.ColumnType.NUMERICAL,
             dtype=ds_pb.DType.DTYPE_INT64,
             count_nas=0,
-            numerical=data_spec_pb2.NumericalSpec(
+            numerical=ds_pb.NumericalSpec(
                 mean=5,
                 standard_deviation=2,
                 min_value=3,
@@ -593,6 +653,8 @@ class RandomForestLearnerTest(LearnerTest):
         sparse_oblique_weights="CONTINUOUS",
     )
     model = learner.train(self.adult.train)
+    assert isinstance(model, decision_forest_model.DecisionForestModel)
+    model.plot_tree().html()
     logging.info("Trained model: %s", model)
 
   def test_adult_mhld_oblique(self):
@@ -602,13 +664,39 @@ class RandomForestLearnerTest(LearnerTest):
     model = learner.train(self.adult.train)
     logging.info("Trained model: %s", model)
 
+  def test_warning_categorical_numerical(self):
+    ds = {
+        "label": np.array([0, 1, 0, 1] * 5, dtype=np.int64),
+        "f": np.array([0, 1, "", ""] * 5, dtype=np.object_),
+    }
+    learner = specialized_learners.RandomForestLearner(
+        label="label", num_trees=4
+    )
+    _ = learner.train(ds)
+
 
 class CARTLearnerTest(LearnerTest):
 
   def test_adult(self):
     learner = specialized_learners.CartLearner(label="income")
 
-    self._check_adult_model(learner=learner, minimum_accuracy=0.853)
+    model, _, _ = self._check_adult_model(
+        learner=learner, minimum_accuracy=0.853
+    )
+    self.assertGreater(model.self_evaluation().accuracy, 0.84)
+
+  def test_adult_with_validation(self):
+    learner = specialized_learners.CartLearner(label="income")
+
+    model, evaluation, _ = self._check_adult_model(
+        learner=learner, minimum_accuracy=0.853, valid=self.adult.test
+    )
+    # Make sure the test dataset is effectively used for validation.
+    self.assertEqual(model.self_evaluation().accuracy, evaluation.accuracy)
+    self.assertEqual(
+        model.self_evaluation().num_examples,
+        self.adult.test_pd.shape[0],
+    )
 
   def test_two_center_regression(self):
     learner = specialized_learners.CartLearner(
@@ -628,6 +716,46 @@ class CARTLearnerTest(LearnerTest):
         "The learner CART does not support monotonic constraints",
     ):
       _ = learner.train(ds)
+
+  def test_tuner_manual(self):
+    tuner = tuner_lib.RandomSearchTuner(num_trials=5)
+    tuner.choice("min_examples", [1, 2, 5, 10])
+    tuner.choice("max_depth", [3, 4, 5, 6])
+    learner = specialized_learners.CartLearner(label="income", tuner=tuner)
+
+    model, _, _ = self._check_adult_model(learner, minimum_accuracy=0.83)
+    logs = model.hyperparameter_optimizer_logs()
+    self.assertIsNotNone(logs)
+    self.assertLen(logs.trials, 5)
+
+  def test_tuner_manual_on_validation(self):
+    tuner = tuner_lib.RandomSearchTuner(num_trials=5)
+    tuner.choice("min_examples", [1, 2, 5, 10])
+    tuner.choice("max_depth", [3, 4, 5, 6])
+    learner = specialized_learners.CartLearner(label="income", tuner=tuner)
+
+    model, evaluation, _ = self._check_adult_model(
+        learner, minimum_accuracy=0.83, valid=self.adult.test
+    )
+    # Make sure the test dataset is effectively used for validation.
+    self.assertEqual(model.self_evaluation().accuracy, evaluation.accuracy)
+    self.assertEqual(
+        model.self_evaluation().num_examples, self.adult.test_pd.shape[0]
+    )
+    logs = model.hyperparameter_optimizer_logs()
+    self.assertIsNotNone(logs)
+    self.assertLen(logs.trials, 5)
+
+  def test_tuner_predefined(self):
+    tuner = tuner_lib.RandomSearchTuner(
+        num_trials=5, automatic_search_space=True
+    )
+    learner = specialized_learners.CartLearner(label="income", tuner=tuner)
+
+    model, _, _ = self._check_adult_model(learner, minimum_accuracy=0.83)
+    logs = model.hyperparameter_optimizer_logs()
+    self.assertIsNotNone(logs)
+    self.assertLen(logs.trials, 5)
 
 
 class GradientBoostedTreesLearnerTest(LearnerTest):
@@ -672,6 +800,17 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
     evaluation = model.evaluate(self.synthetic_ranking.test_path)
     self.assertGreaterEqual(evaluation.ndcg, 0.70)
     self.assertLessEqual(evaluation.ndcg, 0.74)
+
+  def test_adult_sparse_oblique(self):
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label="income",
+        num_trees=5,
+        split_axis="SPARSE_OBLIQUE",
+    )
+    model = learner.train(self.adult.train)
+    assert isinstance(model, decision_forest_model.DecisionForestModel)
+    model.plot_tree().html()
+    logging.info("Trained model: %s", model)
 
   def test_adult_num_threads(self):
     learner = specialized_learners.GradientBoostedTreesLearner(

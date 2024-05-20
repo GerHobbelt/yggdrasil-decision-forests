@@ -30,7 +30,6 @@ from ydf.dataset import dataset
 from ydf.dataset import dataspec
 from ydf.metric import metric
 from ydf.model import analysis
-from ydf.model import export_tf
 from ydf.model import model_metadata
 from ydf.model import optimizer_logs
 from ydf.model import template_cpp_export
@@ -605,7 +604,7 @@ Use `model.describe()` for more details
       input_model_signature_fn: Any = None,
       *,
       mode: Literal["keras", "tf"] = "keras",
-      feature_dtypes: Dict[str, export_tf.TFDType] = {},
+      feature_dtypes: Dict[str, "export_tf.TFDType"] = {},  # pytype: disable=name-error
       servo_api: bool = False,
       feed_example_proto: bool = False,
       pre_processing: Optional[Callable] = None,  # pylint: disable=g-bare-generic
@@ -726,7 +725,16 @@ Use `model.describe()` for more details
         (default), uses `tempfile.mkdtemp` default temporary directory.
     """
 
-    export_tf.ydf_model_to_tensorflow_saved_model(
+    if mode == "keras":
+      log.warning(
+          "Calling `to_tensorflow_saved_model(mode='keras', ...)`. Use"
+          " `to_tensorflow_saved_model(mode='tf', ...)` instead. mode='tf' is"
+          " more efficient, has better compatibility, and offers more options."
+          " Starting June 2024, `mode='tf'` will become the default value.",
+          message_id=log.WarningMessage.TO_TF_SAVED_MODEL_KERAS_MODE,
+      )
+
+    _get_export_tf().ydf_model_to_tensorflow_saved_model(
         ydf_model=self,
         path=path,
         input_model_signature_fn=input_model_signature_fn,
@@ -805,11 +813,66 @@ Use `model.describe()` for more details
       A TensorFlow @tf.function.
     """
 
-    return export_tf.ydf_model_to_tf_function(
+    return _get_export_tf().ydf_model_to_tf_function(
         ydf_model=self,
         temp_dir=temp_dir,
         can_be_saved=can_be_saved,
         squeeze_binary_classification=squeeze_binary_classification,
+    )
+
+  def to_jax_function(  # pytype: disable=name-error
+      self,
+      jit: bool = True,
+      apply_activation: bool = True,
+      leaves_as_params: bool = False,
+  ) -> "export_jax.JaxModel":
+    """Converts the YDF model into a JAX function.
+
+    Usage example:
+
+    ```python
+    import ydf
+    import numpy as np
+    import jax.numpy as jnp
+
+    # Train a model.
+    model = ydf.RandomForestLearner(label="l").train({
+        "f1": np.random.random(size=100),
+        "f2": np.random.random(size=100),
+        "l": np.random.randint(2, size=100),
+    })
+
+    # Convert model to a JAX function.
+    jax_model = model.o_jax_function()
+
+    # Make predictions with the TF module.
+    jax_predictions = jax_model.predict({
+        "f1": jnp.array([0, 0.5, 1]),
+        "f2": jnp.array([1, 0, 0.5]),
+    })
+    ```
+
+    TODO: Document the encoder and jax params.
+
+    Args:
+      jit: If true, compiles the function with @jax.jit.
+      apply_activation: Should the activation function, if any, be applied on
+        the model output.
+      leaves_as_params: If true, exports the leaf values as learnable
+        parameters. In this case, `params` is set in the returned value, and it
+        should be passed to `predict(feature_values, params)`.
+
+    Returns:
+      A dataclass containing the JAX prediction function (`predict`) and
+      optionnaly the model parameteres (`params`) and feature encoder
+      (`encoder`).
+    """
+
+    return _get_export_jax().to_jax_function(
+        model=self,
+        jit=jit,
+        apply_activation=apply_activation,
+        leaves_as_params=leaves_as_params,
     )
 
   def hyperparameter_optimizer_logs(
@@ -982,6 +1045,31 @@ Use `model.describe()` for more details
         the fastest engine.
     """
     self._model.ForceEngine(engine_name)
+
+
+def _get_export_jax():
+  try:
+    from ydf.model import export_jax  # pylint: disable=g-import-not-at-top,import-outside-toplevel # pytype: disable=import-error
+
+    return export_jax
+  except ImportError as exc:
+    raise ValueError(
+        '"jax" is needed by this function. Make sure it installed and try'
+        " again. See https://jax.readthedocs.io/en/latest/installation.html"
+    ) from exc
+
+
+def _get_export_tf():
+  try:
+    from ydf.model import export_tf  # pylint: disable=g-import-not-at-top,import-outside-toplevel # pytype: disable=import-error
+
+    return export_tf
+  except ImportError as exc:
+    raise ValueError(
+        '"tensorflow_decision_forests" is needed by this function. Make sure '
+        "it installed and try again. If using pip, run `pip install"
+        " tensorflow_decision_forests`."
+    ) from exc
 
 
 ModelType = TypeVar("ModelType", bound=GenericModel)
