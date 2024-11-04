@@ -77,6 +77,13 @@ class VerticalDataset:
             " task is selected. For example, you cannot train a classification"
             " model (task=ydf.Task.CLASSIFICATION) with floating point labels."
         )
+      if isinstance(value, list):
+        raise ValueError(
+            f"Cannot import column {column.name!r} with"
+            f" semantic={column.semantic} as it contains lists.\nNote:"
+            " Unrolling multi-dimensional columns is only supported for numpy"
+            " arrays"
+        )
       raise ValueError(
           f"Cannot import column {column.name!r} with"
           f" semantic={column.semantic} and"
@@ -134,6 +141,13 @@ class VerticalDataset:
               " a regression model (task=ydf.Task.REGRESSION) on a string"
               " column."
           ) from e
+      if column_data.ndim != 1:
+        raise ValueError(
+            f"Cannot convert {column.semantic.name} column {column.name!r} "
+            f" with content={column_data!r} to a 1-dimensional array of"
+            " np.float32 values. Note: Unrolling multi-dimensional columns is"
+            " only supported for numpy arrays"
+        )
 
       if column.semantic == dataspec.Semantic.NUMERICAL:
         self._dataset.PopulateColumnNumericalNPFloat32(
@@ -172,6 +186,13 @@ class VerticalDataset:
             f" values. Got {original_column_data!r}."
         )
         raise ValueError(message)
+      if column_data.ndim != 1:
+        raise ValueError(
+            f"Cannot convert BOOLEAN column {column.name!r}"
+            f" with content={column_data!r} to a 1-dimensional array of"
+            " np.float32 values. Note: Unrolling multi-dimensional columns is"
+            " only supported for numpy arrays"
+        )
 
       self._dataset.PopulateColumnBooleanNPBool(
           column.name,
@@ -194,19 +215,22 @@ class VerticalDataset:
         column_data = np.full_like(bool_column_data, b"false", "|S5")
         column_data[bool_column_data] = b"true"
         force_dictionary = [dataspec.YDF_OOD_BYTES, b"false", b"true"]
-      elif (
-          is_label
-          and column_data.dtype.type in dataspec.NP_SUPPORTED_INT_DTYPE
-          and (dictionary_size := dense_integer_dictionary_size(column_data))
-      ):
-        column_data = column_data.astype(np.bytes_)
-        force_dictionary = [dataspec.YDF_OOD_BYTES, *range(dictionary_size)]
+      elif column_data.dtype.type in dataspec.NP_SUPPORTED_INT_DTYPE:
+        if is_label:
+          # Sort increasing.
+          dictionary = np.unique(column_data)
+          column_data = column_data.astype(np.bytes_)
+          force_dictionary = [dataspec.YDF_OOD_BYTES, *dictionary]
+        else:
+          column_data = column_data.astype(np.bytes_)
       elif column_data.dtype.type in [np.object_, np.str_]:
         column_data = self._normalize_categorical_string_values(
             column, column_data, original_column_data
         )
-      elif column_data.dtype.type in dataspec.NP_SUPPORTED_INT_DTYPE:
-        column_data = column_data.astype(np.bytes_)
+        if is_label:
+          # Sort lexicographically (as opposed to by frequency as for features).
+          dictionary = np.unique(column_data)
+          force_dictionary = [dataspec.YDF_OOD_BYTES, *dictionary]
       elif np.issubdtype(column_data.dtype, np.floating):
         message = (
             f"Cannot import column {column.name!r} with"
@@ -221,6 +245,7 @@ class VerticalDataset:
           )
         message += f"\nGot {original_column_data!r}."
         raise ValueError(message)
+      assert column_data.ndim == 1, "Categorical columns must be 1-dimensional"
 
       if column_data.dtype.type == np.bytes_:
         if inference_args is not None:
