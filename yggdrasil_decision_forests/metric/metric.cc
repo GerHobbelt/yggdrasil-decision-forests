@@ -28,12 +28,14 @@
 #include <vector>
 
 #include "absl/base/optimization.h"
+#include "absl/log/log.h"
 #include "absl/strings/string_view.h"
 #include "absl/types/span.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/metric/metric.pb.h"
 #include "yggdrasil_decision_forests/metric/ranking_utils.h"
 #include "yggdrasil_decision_forests/model/abstract_model.pb.h"
+#include "yggdrasil_decision_forests/utils/compatibility.h"
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/status/status.h"
@@ -359,8 +361,8 @@ absl::Status FinalizeRankingMetricsFromSampledPredictions(
 
   // Performs bootstrapping.
   if (option.bootstrapping_samples() > 0) {
-    YDF_LOG(INFO) << "Computing ranking confidence intervals of evaluation "
-                     "metrics with bootstrapping.";
+    LOG(INFO) << "Computing ranking confidence intervals of evaluation "
+                 "metrics with bootstrapping.";
 
     BootstrapMetricEstimate(individual_ndcgs, option.bootstrapping_samples(),
                             eval->mutable_ranking()->mutable_ndcg());
@@ -807,8 +809,11 @@ absl::Status InitializeEvaluation(const proto::EvaluationOptions& option,
   switch (option.task()) {
     case model::proto::Task::CLASSIFICATION: {
       if (label_column.type() != dataset::proto::ColumnType::CATEGORICAL) {
-        return absl::InvalidArgumentError(
-            "Classification requires a categorical label.");
+        return absl::InvalidArgumentError(absl::Substitute(
+            "Classification requires a categorical label, got $0 of type $1 "
+            "instead.",
+            label_column.name(),
+            dataset::proto::ColumnType_Name(label_column.type())));
       }
       // Allocate and zero the confusion matrix.
       const int64_t num_classes =
@@ -827,15 +832,21 @@ absl::Status InitializeEvaluation(const proto::EvaluationOptions& option,
     } break;
     case model::proto::Task::REGRESSION:
       if (label_column.type() != dataset::proto::ColumnType::NUMERICAL) {
-        return absl::InvalidArgumentError(
-            "Regression requires a numerical label.");
+        return absl::InvalidArgumentError(absl::Substitute(
+            "Regression requires a numerical label, got $0 of type $1 "
+            "instead.",
+            label_column.name(),
+            dataset::proto::ColumnType_Name(label_column.type())));
       }
       eval->mutable_regression();
       break;
     case model::proto::Task::RANKING:
       if (label_column.type() != dataset::proto::ColumnType::NUMERICAL) {
-        return absl::InvalidArgumentError(
-            "Ranking requires a numerical label.");
+        return absl::InvalidArgumentError(absl::Substitute(
+            "Ranking requires a numerical label, got $0 of type $1 "
+            "instead.",
+            label_column.name(),
+            dataset::proto::ColumnType_Name(label_column.type())));
       }
       eval->mutable_ranking();
       break;
@@ -847,11 +858,13 @@ absl::Status InitializeEvaluation(const proto::EvaluationOptions& option,
       RETURN_IF_ERROR(uplift::InitializeNumericalUpliftEvaluation(
           option, label_column, eval));
       break;
-    case model::proto::Task::ANOMALY_DETECTION:
-      eval->mutable_anomaly_detection();
-      break;
+    case model::proto::Task::ANOMALY_DETECTION: {
+      return absl::InvalidArgumentError(
+          "Evaluating with task ANOMALY_DETECTION is not supported. Use "
+          "CLASSIFICATION instead.");
+    } break;
     default:
-      STATUS_FATALS("Non supported task type: ",
+      STATUS_FATALS("Unsupported task type: ",
                     model::proto::Task_Name(option.task()));
   }
   return absl::OkStatus();
@@ -932,17 +945,92 @@ absl::Status AddPrediction(const proto::EvaluationOptions& option,
       need_prediction_sampling = true;
       break;
 
-    case model::proto::Task::ANOMALY_DETECTION:
-      break;
-
     default:
-      break;
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Unsupported task: ", model::proto::Task_Name(option.task())));
   }
   std::uniform_real_distribution<float> dist;
   if (need_prediction_sampling && dist(*rnd) <= option.prediction_sampling()) {
     *eval->mutable_sampled_predictions()->Add() = pred;
     eval->set_count_sampled_predictions(eval->count_sampled_predictions() +
                                         pred.weight());
+  }
+  return absl::OkStatus();
+}
+
+absl::Status ChangePredictionType(model::proto::Task src_task,
+                                  model::proto::Task dst_task,
+                                  const model::proto::Prediction& src_pred,
+                                  model::proto::Prediction* dst_pred) {
+  if (src_task == dst_task) {
+    *dst_pred = src_pred;
+  }
+  // Source is CLASSIFICATION
+  else if (src_task == model::proto::Task::CLASSIFICATION) {
+    if (dst_task == model::proto::Task::RANKING) {
+      if (src_pred.classification().distribution().counts_size() != 3) {
+        STATUS_FATAL(
+            "Conversion CLASSIFICATION -> RANKING only possible for "
+            "binary classification.");
+      }
+      dst_pred->mutable_ranking()->set_relevance(
+          src_pred.classification().distribution().counts(2) /
+          src_pred.classification().distribution().sum());
+    } else if (dst_task == model::proto::Task::REGRESSION) {
+      if (src_pred.classification().distribution().counts_size() != 3) {
+        STATUS_FATAL(
+            "Conversion CLASSIFICATION -> REGRESSION only possible for "
+            "binary classification.");
+      }
+      dst_pred->mutable_regression()->set_value(
+          src_pred.classification().distribution().counts(2) /
+          src_pred.classification().distribution().sum());
+    }
+  }
+  // Source is REGRESSION
+  else if (src_task == model::proto::Task::REGRESSION) {
+    float value = src_pred.regression().value();
+    if (dst_task == model::proto::Task::RANKING) {
+      dst_pred->mutable_ranking()->set_relevance(value);
+    } else if (dst_task == model::proto::Task::CLASSIFICATION) {
+      value = utils::clamp(value, 0.f, 1.f);
+      auto* dst_clas = dst_pred->mutable_classification();
+      dst_clas->set_value(value >= 0.5f ? 2 : 1);
+      dst_clas->mutable_distribution()->clear_counts();
+      dst_clas->mutable_distribution()->set_sum(1.f);
+      dst_clas->mutable_distribution()->add_counts(0.f);
+      dst_clas->mutable_distribution()->add_counts(1.f - value);
+      dst_clas->mutable_distribution()->add_counts(value);
+    }
+  }
+  // Source is RANKING
+  else if (src_task == model::proto::Task::RANKING &&
+           dst_task == model::proto::Task::REGRESSION) {
+    const float value = src_pred.ranking().relevance();
+    dst_pred->mutable_regression()->set_value(value);
+  }
+  // Source is ANOMALY_DETECTION
+  else if (src_task == model::proto::Task::ANOMALY_DETECTION) {
+    float value = src_pred.anomaly_detection().value();
+    if (dst_task == model::proto::Task::CLASSIFICATION) {
+      value = utils::clamp(value, 0.f, 1.f);
+      auto* dst_clas = dst_pred->mutable_classification();
+      // Assume the positive class is the abnormal one.
+      dst_clas->set_value(value >= 0.5f ? 2 : 1);
+      dst_clas->mutable_distribution()->clear_counts();
+      dst_clas->mutable_distribution()->set_sum(1.f);
+      dst_clas->mutable_distribution()->add_counts(0.f);
+      dst_clas->mutable_distribution()->add_counts(1.f - value);
+      dst_clas->mutable_distribution()->add_counts(value);
+    } else if (dst_task == model::proto::Task::RANKING) {
+      dst_pred->mutable_ranking()->set_relevance(value);
+    }
+  }
+  // Non supported
+  else {
+    STATUS_FATALS("Non supported override of task from ",
+                  model::proto::Task_Name(src_task), " to ",
+                  model::proto::Task_Name(dst_task));
   }
   return absl::OkStatus();
 }
@@ -972,8 +1060,8 @@ absl::Status FinalizeEvaluation(const proto::EvaluationOptions& option,
     case model::proto::Task::REGRESSION: {
       // Performs bootstrapping.
       if (option.bootstrapping_samples() > 0) {
-        YDF_LOG(INFO) << "Computing rmse intervals of evaluation metrics with "
-                         "bootstrapping.";
+        LOG(INFO) << "Computing rmse intervals of evaluation metrics with "
+                     "bootstrapping.";
         RETURN_IF_ERROR(
             internal::UpdateRMSEConfidenceIntervalUsingBootstrapping(option,
                                                                      eval));
@@ -989,11 +1077,9 @@ absl::Status FinalizeEvaluation(const proto::EvaluationOptions& option,
           option, label_column, eval));
       break;
 
-    case model::proto::Task::ANOMALY_DETECTION:
-      break;
-
     default:
-      break;
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Unsupported task: ", model::proto::Task_Name(option.task())));
   }
   if (eval->num_folds() == 0) {
     eval->set_num_folds(1);
@@ -1241,8 +1327,8 @@ absl::Status BuildROCCurve(const proto::EvaluationOptions& option,
     return absl::OkStatus();
   }
   if (sorted_predictions.empty()) {
-    YDF_LOG(WARNING) << "No sampled prediction found. Computation of the ROC "
-                        "curve skipped.";
+    LOG(WARNING) << "No sampled prediction found. Computation of the ROC "
+                    "curve skipped.";
     return absl::OkStatus();
   }
   std::sort(sorted_predictions.begin(), sorted_predictions.end(),
@@ -1262,10 +1348,9 @@ absl::Status BuildROCCurve(const proto::EvaluationOptions& option,
 
   // Performs bootstrapping.
   if (option.bootstrapping_samples() > 0) {
-    YDF_LOG(INFO)
-        << "Computing confidence intervals of evaluation metrics with "
-           "bootstrapping for label #"
-        << label_value << ".";
+    LOG(INFO) << "Computing confidence intervals of evaluation metrics with "
+                 "bootstrapping for label #"
+              << label_value << ".";
     RETURN_IF_ERROR(internal::ComputeRocConfidenceIntervalsUsingBootstrapping(
         option, sorted_predictions, roc));
   }
@@ -1323,7 +1408,7 @@ absl::Status MergeEvaluation(const proto::EvaluationOptions& option,
                                       dst->mutable_anomaly_detection());
       break;
     case proto::EvaluationResults::TYPE_NOT_SET:
-      return absl::InvalidArgumentError("Non initialized evaluation");
+      return absl::InvalidArgumentError("Evaluation not initialized.");
       break;
   }
   return absl::OkStatus();
@@ -1474,7 +1559,8 @@ absl::StatusOr<std::unordered_map<std::string, std::string>> ExtractFlatMetrics(
       }
     } break;
     default:
-      return absl::InvalidArgumentError("Non implemented task");
+      return absl::InvalidArgumentError(absl::StrCat(
+          "Unsupported task: ", model::proto::Task_Name(evaluation.task())));
   }
   return flat_metrics;
 }
@@ -1555,12 +1641,12 @@ absl::StatusOr<double> GetMetricClassificationOneVsOthers(
     // with the higher index) is considered the positive class.
     positive_class_idx = num_label_classes - 1;
     if (num_label_classes > 3) {
-      YDF_LOG(WARNING) << "The \"positive_class\" was not provided. Using "
-                          "positive_class_idx="
-                       << positive_class_idx << "=\""
-                       << dataset::CategoricalIdxToRepresentation(
-                              evaluation.label_column(), positive_class_idx)
-                       << "\" instead.";
+      LOG(WARNING) << "The \"positive_class\" was not provided. Using "
+                      "positive_class_idx="
+                   << positive_class_idx << "=\""
+                   << dataset::CategoricalIdxToRepresentation(
+                          evaluation.label_column(), positive_class_idx)
+                   << "\" instead.";
     }
   } else {
     ASSIGN_OR_RETURN(positive_class_idx,
@@ -1687,7 +1773,7 @@ absl::StatusOr<double> GetMetricUplift(
 absl::StatusOr<double> GetMetricAnomalyDetection(
     const proto::EvaluationResults& evaluation,
     const proto::MetricAccessor::AnomalyDetection& metric) {
-  return absl::InvalidArgumentError("No AnomalyDetection metric");
+  return absl::InvalidArgumentError("No Anomaly Detection metric");
 }
 
 absl::StatusOr<double> GetUserCustomizedMetrics(

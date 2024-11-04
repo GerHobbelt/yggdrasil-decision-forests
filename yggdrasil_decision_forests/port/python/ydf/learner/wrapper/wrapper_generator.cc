@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/ascii.h"
@@ -319,6 +320,8 @@ included for reference only. The actual wrappers are re-generated during
 compilation.
 """
 
+# pytype: skip-file
+# TODO: b/362480899 - Re-enable typing after pytype issue is fixed.
 from typing import Dict, Optional, Sequence, Set, Union
 $0
 
@@ -334,8 +337,8 @@ $0
     if (learner_config_it != learner_configs.end()) {
       learner_config = learner_config_it->second;
     } else {
-      YDF_LOG(INFO) << "No learner config for " << learner_key
-                    << ". Using default config.";
+      LOG(INFO) << "No learner config for " << learner_key
+                << ". Using default config.";
     }
 
     const auto class_name = LearnerKeyToClassName(learner_key);
@@ -624,6 +627,7 @@ $2
   def __init__(self,
       label: $9,
       task: generic_learner.Task = generic_learner.Task.$8,
+      *,
       weights: Optional[str] = None,
       ranking_group: Optional[str] = None,
       uplift_treatment: Optional[str] = None,
@@ -633,8 +637,8 @@ $2
       min_vocab_frequency: int = 5,
       discretize_numerical_columns: bool = False,
       num_discretized_numerical_bins: int = 255,
-      max_num_scanned_rows_to_infer_semantic: int = 10000,
-      max_num_scanned_rows_to_compute_statistics: int = 10000,
+      max_num_scanned_rows_to_infer_semantic: int = 100_000,
+      max_num_scanned_rows_to_compute_statistics: int = 100_000,
       data_spec: Optional[data_spec_pb2.DataSpecification] = None,
 $3,
       num_threads: Optional[int] = None,

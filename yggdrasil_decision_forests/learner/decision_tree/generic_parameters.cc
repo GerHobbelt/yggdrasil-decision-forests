@@ -18,11 +18,13 @@
 #include <string>
 
 #include "absl/container/flat_hash_set.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
 #include "yggdrasil_decision_forests/learner/abstract_learner.h"
 #include "yggdrasil_decision_forests/learner/decision_tree/decision_tree.pb.h"
 #include "yggdrasil_decision_forests/utils/hyper_parameters.h"
@@ -33,9 +35,56 @@ namespace yggdrasil_decision_forests {
 namespace model {
 namespace decision_tree {
 
+namespace {
+absl::Status PruneInvalidHyperparameters(
+    model::proto::GenericHyperParameterSpecification* hparam_def,
+    absl::optional<absl::flat_hash_set<std::string>> valid_hyperparameters,
+    absl::optional<absl::flat_hash_set<std::string>> invalid_hyperparameters) {
+  if (valid_hyperparameters.has_value() !=
+      invalid_hyperparameters.has_value()) {
+    return absl::InternalError(
+        "A caller must either supply both the valid hyperparameter and the "
+        "invalid hyperparameters or none of them");
+  }
+  if (!valid_hyperparameters.has_value()) {
+    return absl::OkStatus();
+  }
+  auto& fields = *hparam_def->mutable_fields();
+  absl::flat_hash_set<std::string> field_names;
+  for (const auto& field : fields) {
+    field_names.insert(field.first);
+  }
+  for (const auto& invalid_hp : invalid_hyperparameters.value()) {
+    if (!field_names.contains(invalid_hp)) {
+      return absl::InternalError(
+          absl::StrCat("Unknown invalid hyperparameter: ", invalid_hp));
+    }
+    fields.erase(invalid_hp);
+  }
+  // Check if the definitions are consistent.
+  for (const auto& valid_hp : valid_hyperparameters.value()) {
+    if (!field_names.contains(valid_hp)) {
+      return absl::InternalError(
+          absl::StrCat("Unknown valid hyperparameter: ", valid_hp));
+    }
+  }
+  for (const auto& existing_hp : fields) {
+    if (!valid_hyperparameters.value().contains(existing_hp.first)) {
+      return absl::InternalError(
+          absl::StrCat("Hyperparameter ", existing_hp.first,
+                       " is neither listed as valid nor invalid."));
+    }
+  }
+
+  return absl::OkStatus();
+}
+}  // namespace
+
 absl::Status GetGenericHyperParameterSpecification(
     const proto::DecisionTreeTrainingConfig& config,
-    model::proto::GenericHyperParameterSpecification* hparam_def) {
+    model::proto::GenericHyperParameterSpecification* hparam_def,
+    absl::optional<absl::flat_hash_set<std::string>> valid_hyperparameters,
+    absl::optional<absl::flat_hash_set<std::string>> invalid_hyperparameters) {
   auto& fields = *hparam_def->mutable_fields();
 
   const auto get_params = [&fields](const absl::string_view key)
@@ -194,7 +243,7 @@ absl::Status GetGenericHyperParameterSpecification(
     param->mutable_documentation()->set_description(
         R"(What structure of split to consider for numerical features.
 - `AXIS_ALIGNED`: Axis aligned splits (i.e. one condition at a time). This is the "classical" way to train a tree. Default value.
-- `SPARSE_OBLIQUE`: Sparse oblique splits (i.e. random splits one a small number of features) from "Sparse Projection Oblique Random Forests", Tomita et al., 2020.
+- `SPARSE_OBLIQUE`: Sparse oblique splits (i.e. random splits on a small number of features) from "Sparse Projection Oblique Random Forests", Tomita et al., 2020.
 - `MHLD_OBLIQUE`: Multi-class Hellinger Linear Discriminant splits from "Classification Based on Multivariate Contrast Patterns", Canete-Sifuentes et al., 2029)");
   }
   {
@@ -446,6 +495,9 @@ The paper "Sparse Projection Oblique Random Forests" (Tomita et al, 2020) does n
         R"(For honest trees only i.e. honest=true. If true, a new random separation is generated for each tree. If false, the same separation is used for all the trees (e.g., in Gradient Boosted Trees containing multiple trees).)");
   }
 
+  RETURN_IF_ERROR(PruneInvalidHyperparameters(hparam_def, valid_hyperparameters,
+                                              invalid_hyperparameters));
+
   return absl::OkStatus();
 }
 
@@ -460,8 +512,9 @@ absl::Status SetHyperParameters(
     const auto hparam = generic_hyper_params->Get(kHParamMaxDepth);
     if (hparam.has_value()) {
       dt_config->set_max_depth(hparam.value().value().integer());
-      if (dt_config->max_depth() < 2) {
-        YDF_LOG(WARNING)
+      if (dt_config->max_depth() < 2 && dt_config->max_depth() != -1 &&
+          dt_config->max_depth() != -2) {
+        LOG(WARNING)
             << "Setting max_depth=" << dt_config->max_depth()
             << " for a training model will not result in any learning (i.e. "
                "root tree without conditions). To learn stumps (i.e., decision "

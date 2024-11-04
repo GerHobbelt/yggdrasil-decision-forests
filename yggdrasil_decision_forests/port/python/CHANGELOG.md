@@ -1,6 +1,22 @@
 # Changelog
 
-## Head
+## HEAD
+
+### Breaking
+
+-   Disallow positional parameters for the learners, except for label and task.
+
+### Feature
+
+-   Warn if training on a VerticalDataset and fail if attempting to modify the
+    columns in a VerticalDataset during training.
+-   User can override the model's task, label or group during evaluation.
+
+### Fix
+
+-   Remove the unsupported / invalid hyperparameters from isolation forests.
+
+## 0.7.0 - 2024-08-21
 
 ### Feature
 
@@ -13,13 +29,32 @@
 -   Models can be pickled safely.
 -   Native support for Xarray as a dataset format for all operations (e.g.,
     training, evaluation, predictions).
--   The output of `model.to_jax_function` can then be converted to a TensorFlow
-    Lite model.
+-   The output of `model.to_jax_function` can be converted to a TensorFlow Lite
+    model.
+-   Change the default number of examples to scan when training on files to
+    determine the semantic and dictionaries of columns from 10k to 100k.
+-   Various improvements of error messages.
+-   Evaluation for Anomaly Detection models.
+-   Oblique splits for Anomaly Detection models.
 
 ### Fix
 
 -   Fix parsing of multidimensional ragged inputs.
 -   Fix isolation forest hyperparameter defaults.
+-   Fix bug causing distributed training to fail on a sharded dataset containing
+    an empty shard.
+-   Handle unordered categorical sets in training.
+-   Fix dataspec ignoring definitions of unrolled columns, such as
+    multidimensional categorical integers.
+-   Fix error when defining categorical sets for non-ragged multidimensional
+    inputs.
+-   MacOS: Fix compatibility with other protobuf-using libraries such as
+    Tensorflow.
+
+#### Release music
+
+Rondo Alla ingharese quasi un capriccio "Die Wut über den verlorenen Groschen",
+Op. 129. Ludwig van Beethoven
 
 ## 0.6.0 - 2024-07-04
 

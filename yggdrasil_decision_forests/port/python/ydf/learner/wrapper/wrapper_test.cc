@@ -20,6 +20,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/status/statusor.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/learner/abstract_learner.h"
@@ -104,7 +105,7 @@ TEST(LearnerWrappers, LearnerKeyToClassName) {
 
 TEST(LearnerWrappers, Base) {
   ASSERT_OK_AND_ASSIGN(const auto content, GenLearnerWrapper());
-  YDF_LOG(INFO) << "content:\n" << content;
+  LOG(INFO) << "content:\n" << content;
 
   EXPECT_THAT(content, HasSubstr(R"(
 class FakeAlgorithmLearner(generic_learner.GenericLearner):
@@ -231,6 +232,7 @@ class FakeAlgorithmLearner(generic_learner.GenericLearner):
   def __init__(self,
       label: str,
       task: generic_learner.Task = generic_learner.Task.CLASSIFICATION,
+      *,
       weights: Optional[str] = None,
       ranking_group: Optional[str] = None,
       uplift_treatment: Optional[str] = None,
@@ -240,8 +242,8 @@ class FakeAlgorithmLearner(generic_learner.GenericLearner):
       min_vocab_frequency: int = 5,
       discretize_numerical_columns: bool = False,
       num_discretized_numerical_bins: int = 255,
-      max_num_scanned_rows_to_infer_semantic: int = 10000,
-      max_num_scanned_rows_to_compute_statistics: int = 10000,
+      max_num_scanned_rows_to_infer_semantic: int = 100_000,
+      max_num_scanned_rows_to_compute_statistics: int = 100_000,
       data_spec: Optional[data_spec_pb2.DataSpecification] = None,
       a: float = 1.0,
       b: Optional[float] = 4.0,

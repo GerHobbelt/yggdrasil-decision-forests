@@ -31,12 +31,15 @@
 
 #include "absl/status/status.h"
 #include "absl/strings/ascii.h"
+#include "absl/strings/numbers.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/str_join.h"
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
+#include "absl/types/optional.h"
+#include "absl/types/span.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/example.pb.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
@@ -314,7 +317,7 @@ absl::Status CsvRowToExample(const std::vector<std::string>& csv_fields,
         float num_value;
         if (!absl::SimpleAtof(value, &num_value)) {
           return absl::InvalidArgumentError(
-              absl::StrCat("Cannot parse: ", value));
+              absl::StrCat("Cannot parse value ", value, " as a float"));
         }
 
         dst_value->set_numerical(num_value);
@@ -326,7 +329,7 @@ absl::Status CsvRowToExample(const std::vector<std::string>& csv_fields,
         float num_value;
         if (!absl::SimpleAtof(value, &num_value)) {
           return absl::InvalidArgumentError(
-              absl::StrCat("Cannot parse: ", value));
+              absl::StrCat("Cannot parse value ", value, " as a float"));
         }
         dst_value->set_discretized_numerical(
             NumericalToDiscretizedNumerical(col_spec, num_value));

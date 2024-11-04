@@ -80,7 +80,7 @@ class GenericLearner:
     if self._label is not None and not isinstance(label, str):
       raise ValueError("The 'label' should be a string")
     if task != Task.ANOMALY_DETECTION and not self._label:
-      raise ValueError("Constructing the learner requires a non-empty label.")
+      raise ValueError("This learner requires a label.")
 
     if self._ranking_group is not None and task != Task.RANKING:
       raise ValueError(
@@ -406,30 +406,67 @@ Hyper-parameters: ydf.{self._hyperparameters}
       self, ds: dataset.InputDataset
   ) -> dataset.VerticalDataset:
     if isinstance(ds, dataset.VerticalDataset):
+      if self._data_spec is not None:
+        raise ValueError(
+            "When training on a VerticalDataset, no data spec can be explicitly"
+            " provided. Specify the data spec when creating the VerticalDataset"
+            " or directly train on the data source."
+        )
+      if self._data_spec_args.columns is not None:
+        raise ValueError(
+            "When training on a VerticalDataset, the columns or its types"
+            " cannot be changed during training. Specify the columns when"
+            " creating the VerticalDataset or directly train on the data"
+            " source."
+        )
+      log.warning(
+          "When training on a VerticalDataset, options to modify the dataset"
+          " are ignored. Specify these options directly when constructing the"
+          " VerticalDataset. Ignored options are `columns, include_all_columns,"
+          " max_vocab_count, min_vocab_frequency, discretize_numerical_columns,"
+          " num_discretized_numerical_bins,"
+          " max_num_scanned_rows_to_infer_semantic,"
+          " max_num_scanned_rows_to_compute_statistics`. ",
+          message_id=log.WarningMessage.TRAINING_VERTICAL_DATASET,
+      )
       return ds
-      # TODO: Check that the user has not specified a data spec guide.
     else:
 
       # List of columns that cannot be unrolled.
-      dont_unroll_columns = [self._label]
+      single_dim_columns = [self._label]
       for column in [
           self._weights,
           self._ranking_group,
           self._uplift_treatment,
       ]:
         if column:
-          dont_unroll_columns.append(column)
+          single_dim_columns.append(column)
 
       effective_data_spec_args = None
       if self._data_spec is None:
         effective_data_spec_args = self._build_data_spec_args()
+
+      required_columns = None  # All columns in the dataspec are required.
+      if self._task == Task.ANOMALY_DETECTION:
+        if self._data_spec is not None:
+          required_columns = [
+              col.name
+              for col in self._data_spec.columns
+              if col.name != self._label
+          ]
+        if effective_data_spec_args is not None:
+          required_columns = [
+              col.name
+              for col in effective_data_spec_args.columns
+              if col is not None and col.name != self._label
+          ]
       return dataset.create_vertical_dataset_with_spec_or_args(
           ds,
           data_spec=self._data_spec,
           inference_args=effective_data_spec_args,
-          required_columns=None,  # All columns in the dataspec are required.
-          dont_unroll_columns=dont_unroll_columns,
-          label=self._label,
+          required_columns=required_columns,
+          single_dim_columns=single_dim_columns,
+          label=self._label if self._task != Task.ANOMALY_DETECTION else None,
       )
 
   def cross_validation(
@@ -533,7 +570,9 @@ Hyper-parameters: ydf.{self._hyperparameters}
       column are specified as features.
     """
 
-    def create_label_column(name: str, task: Task) -> Optional[dataspec.Column]:
+    def create_label_column(
+        name: Optional[str], task: Task
+    ) -> Optional[dataspec.Column]:
       if task in [Task.CLASSIFICATION, Task.CATEGORICAL_UPLIFT]:
         return dataspec.Column(
             name=name,
@@ -544,8 +583,16 @@ Hyper-parameters: ydf.{self._hyperparameters}
       elif task in [Task.REGRESSION, Task.RANKING, Task.NUMERICAL_UPLIFT]:
         return dataspec.Column(name=name, semantic=dataspec.Semantic.NUMERICAL)
       elif task in [Task.ANOMALY_DETECTION]:
-        # No label column
-        return None
+        if name is None:
+          # No label column
+          return None
+        else:
+          return dataspec.Column(
+              name=name,
+              semantic=dataspec.Semantic.CATEGORICAL,
+              max_vocab_count=-1,
+              min_vocab_frequency=1,
+          )
       else:
         raise ValueError(f"Unsupported task {task.name} for label column")
 

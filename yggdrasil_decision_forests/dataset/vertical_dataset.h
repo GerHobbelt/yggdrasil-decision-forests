@@ -30,6 +30,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -131,10 +132,9 @@ class VerticalDataset {
           "The template class argument does not derive  AbstractColumn.");
       T* const casted_column = dynamic_cast<T* const>(this);
       if (!casted_column) {
-        YDF_LOG(FATAL) << "Column \"" << name() << "\" has type "
-                       << proto::ColumnType_Name(type())
-                       << " and is not compatible with type "
-                       << typeid(T).name();
+        LOG(FATAL) << "Column \"" << name() << "\" has type "
+                   << proto::ColumnType_Name(type())
+                   << " and is not compatible with type " << typeid(T).name();
       }
       return casted_column;
     }
@@ -223,6 +223,9 @@ class VerticalDataset {
     // Add a value.
     template <typename Iter>
     void Add(Iter begin, Iter end) {
+      DCHECK((type() != proto::ColumnType::CATEGORICAL_SET &&
+              type() != proto::ColumnType::NUMERICAL_SET) ||
+             std::is_sorted(begin, end));
       const size_t begin_idx = bank_.size();
       bank_.insert(bank_.end(), begin, end);
       values_.emplace_back(begin_idx, bank_.size());
@@ -231,6 +234,9 @@ class VerticalDataset {
     // Set a value.
     template <typename Iter>
     void SetIter(const row_t row, Iter begin, Iter end) {
+      DCHECK((type() != proto::ColumnType::CATEGORICAL_SET &&
+              type() != proto::ColumnType::NUMERICAL_SET) ||
+             std::is_sorted(begin, end));
       const size_t begin_idx = bank_.size();
       bank_.insert(bank_.end(), begin, end);
       values_[row] = {begin_idx, bank_.size()};
@@ -901,9 +907,9 @@ absl::Status VerticalDataset::TemplateScalarStorage<T>::ExtractAndAppend(
       dynamic_cast<VerticalDataset::TemplateScalarStorage<T>*>(dst);
   STATUS_CHECK(cast_dst != nullptr);
   if (values_.empty() && !indices.empty()) {
-    YDF_LOG(FATAL) << "Trying to extract " << indices.size()
-                   << " examples from the non-allocated column \"" << name()
-                   << "\".";
+    LOG(FATAL) << "Trying to extract " << indices.size()
+               << " examples from the non-allocated column \"" << name()
+               << "\".";
   }
   const size_t indices_size = indices.size();
   const size_t init_dst_nrows = dst->nrows();

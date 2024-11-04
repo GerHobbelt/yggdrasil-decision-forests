@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/time/clock.h"
@@ -63,8 +64,7 @@ absl::StatusOr<Preprocessing> PreprocessTrainingDataset(
 
   const auto duration = absl::Now() - time_begin;
   if (duration > absl::Seconds(10)) {
-    YDF_LOG(INFO) << "Feature index computed in "
-                  << absl::FormatDuration(duration);
+    LOG(INFO) << "Feature index computed in " << absl::FormatDuration(duration);
   }
   return preprocessing;
 }

@@ -37,6 +37,8 @@ from ydf.metric import metric
 from ydf.model import generic_model
 from ydf.model import model_lib
 from ydf.model.decision_forest_model import decision_forest_model
+from ydf.model.tree import condition as condition_lib
+from ydf.model.tree import node as node_lib
 from ydf.utils import log
 from ydf.utils import test_utils
 
@@ -79,13 +81,21 @@ class LearnerTest(parameterized.TestCase):
             Column("treat", semantic=dataspec.Semantic.CATEGORICAL),
         ],
     )
-    self.gaussians = test_utils.load_datasets("gaussians")
+    self.gaussians = test_utils.load_datasets(
+        "gaussians",
+        column_args=[
+            Column("label", semantic=dataspec.Semantic.CATEGORICAL),
+            Column("features.0_of_2", semantic=dataspec.Semantic.NUMERICAL),
+            Column("features.1_of_2", semantic=dataspec.Semantic.NUMERICAL),
+        ],
+    )
 
   def _check_adult_model(
       self,
       learner: generic_learner.GenericLearner,
       minimum_accuracy: float,
       check_serialization: bool = True,
+      use_pandas: bool = False,
       valid: Optional[Any] = None,
   ) -> Tuple[generic_model.GenericModel, metric.Evaluation, np.ndarray]:
     """Runs a battery of test on a model compatible with the adult dataset.
@@ -98,21 +108,30 @@ class LearnerTest(parameterized.TestCase):
       - Make sure predictions of original model and serialized model match.
 
     Args:
-      learner: A learner for on the adult dataset.
-      minimum_accuracy: minimum accuracy.
+      learner: A learner on the adult dataset.
+      minimum_accuracy: Minimum accuracy.
       check_serialization: If true, check the serialization of the model.
+      use_pandas: If true, load the dataset from Pandas
+      valid: Optional validation dataset.
 
     Returns:
       The model, its evaluation and the predictions on the test dataset.
     """
+    if use_pandas:
+      train_ds = self.adult.train_pd
+      test_ds = self.adult.test_pd
+    else:
+      train_ds = self.adult.train
+      test_ds = self.adult.test
+
     # Train the model.
-    model = learner.train(self.adult.train, valid=valid)
+    model = learner.train(train_ds, valid=valid)
 
     # Evaluate the trained model.
-    evaluation = model.evaluate(self.adult.test)
+    evaluation = model.evaluate(test_ds)
     self.assertGreaterEqual(evaluation.accuracy, minimum_accuracy)
 
-    predictions = model.predict(self.adult.test)
+    predictions = model.predict(test_ds)
 
     if check_serialization:
       ydf_model_path = os.path.join(
@@ -120,7 +139,7 @@ class LearnerTest(parameterized.TestCase):
       )
       model.save(ydf_model_path)
       loaded_model = model_lib.load_model(ydf_model_path)
-      npt.assert_equal(predictions, loaded_model.predict(self.adult.test))
+      npt.assert_equal(predictions, loaded_model.predict(test_ds))
 
     return model, evaluation, predictions
 
@@ -258,6 +277,29 @@ class RandomForestLearnerTest(LearnerTest):
         learner.train(test_utils.toy_dataset()).task(),
         generic_learner.Task.REGRESSION,
     )
+
+  def test_model_type_regression_unordered_set_indices(self):
+    ds = pd.DataFrame({
+        "col_cat_set": [
+            ["A", "A"],
+            ["A", "B"],
+            ["A", "B"],
+            ["C", "B"],
+            ["C", "B"],
+        ],
+        "binary_int_label": [0, 0, 1, 1, 1],
+    })
+    learner = specialized_learners.RandomForestLearner(
+        label="binary_int_label",
+        num_trees=1,
+        task=generic_learner.Task.REGRESSION,
+        min_vocab_frequency=1,
+        num_candidate_attributes_ratio=1.0,
+        bootstrap_training_dataset=False,
+        min_examples=1,
+        categorical_set_split_greedy_sampling=1.0,
+    )
+    _ = learner.train(ds)
 
   def test_model_type_classification_string_label(self):
     learner = specialized_learners.RandomForestLearner(
@@ -1008,9 +1050,11 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
         ),
     )
 
-    model, _, _ = self._check_adult_model(learner, minimum_accuracy=0.863)
+    model, _, _ = self._check_adult_model(
+        learner, minimum_accuracy=0.863, use_pandas=True
+    )
 
-    _ = model.analyze(self.adult.test)
+    _ = model.analyze(self.adult.test_pd)
 
   def test_with_validation_pd(self):
     evaluation = (
@@ -1139,15 +1183,15 @@ class LoggingTest(parameterized.TestCase):
 class IsolationForestLearnerTest(LearnerTest):
 
   @parameterized.parameters(False, True)
-  def test_gaussians(self, with_labels: bool):
+  def test_gaussians_train_and_analyze(self, with_labels: bool):
     if with_labels:
       learner = specialized_learners.IsolationForestLearner(label="label")
     else:
       learner = specialized_learners.IsolationForestLearner(
-          features=["f1", "f2"]
+          features=["features.0_of_2", "features.1_of_2"]
       )
-    model = learner.train(self.gaussians.train)
-    predictions = model.predict(self.gaussians.test)
+    model = learner.train(self.gaussians.train_pd)
+    predictions = model.predict(self.gaussians.test_pd)
 
     auc = metrics.roc_auc_score(self.gaussians.test_pd["label"], predictions)
     logging.info("auc:%s", auc)
@@ -1156,48 +1200,83 @@ class IsolationForestLearnerTest(LearnerTest):
     _ = model.describe("text")
     _ = model.describe("html")
     _ = model.analyze_prediction(self.gaussians.test_pd.iloc[:1])
-    _ = model.analyze(self.gaussians.test)
+    _ = model.analyze(self.gaussians.test_pd)
 
-    if with_labels:
-      evaluation = model.evaluate(self.gaussians.test)
-      self.assertDictEqual(
-          evaluation.to_dict(),
-          {"num_examples": 280, "num_examples_weighted": 280.0},
+  def test_gaussians_evaluation_default_task(self):
+    learner = specialized_learners.IsolationForestLearner(label="label")
+    model = learner.train(self.gaussians.train)
+    with self.assertRaisesRegex(
+        ValueError,
+        ".*evaluate the model as a classification model.*",
+    ):
+      _ = model.evaluate(self.gaussians.test)
+
+  def test_gaussians_evaluation_no_label(self):
+    learner = specialized_learners.IsolationForestLearner(
+        features=["features.0_of_2", "features.1_of_2"]
+    )
+    model = learner.train(self.gaussians.train_pd)
+    with self.assertRaisesRegex(
+        ValueError,
+        ".*A model cannot be evaluated without a label..*",
+    ):
+      _ = model.evaluate(
+          self.gaussians.test,
+          evaluation_task=generic_learner.Task.CLASSIFICATION,
       )
-    else:
-      with self.assertRaisesRegex(
-          ValueError,
-          "Cannot evaluate an anomaly detection model without a label",
-      ):
-        _ = model.evaluate(self.gaussians.test)
+
+  def test_gaussians_evaluation_with_label(self):
+    learner = specialized_learners.IsolationForestLearner(label="label")
+    model = learner.train(self.gaussians.train)
+    evaluation = model.evaluate(
+        self.gaussians.test,
+        evaluation_task=generic_learner.Task.CLASSIFICATION,
+    )
+    self.assertSameElements(
+        evaluation.to_dict().keys(),
+        [
+            "num_examples",
+            "num_examples_weighted",
+            "accuracy",
+            "characteristic_0:name",
+            "characteristic_0:pr_auc",
+            "characteristic_0:roc_auc",
+            "confusion_matrix",
+            "loss",
+        ],
+    )
+    self.assertAlmostEqual(evaluation.accuracy, 0.98, delta=0.01)
+    self.assertAlmostEqual(evaluation.loss, 0.52, delta=0.01)
 
   def test_max_depth_gaussians_subsample_ratio(self):
     learner = specialized_learners.IsolationForestLearner(
-        features=["f1", "f2"],
+        features=["features.0_of_2", "features.1_of_2"],
         subsample_ratio=0.9,
     )
     self.assertEqual(learner.hyperparameters["subsample_ratio"], 0.9)
-    model = learner.train(self.gaussians.train)
+    model = learner.train(self.gaussians.train_pd)
 
     max_depth = max([get_tree_depth(t.root, 0) for t in model.get_all_trees()])
     self.assertEqual(max_depth, 8)
 
   def test_max_depth_gaussians_subsample_count(self):
     learner = specialized_learners.IsolationForestLearner(
-        features=["f1", "f2"],
+        features=["features.0_of_2", "features.1_of_2"],
         subsample_count=128,
     )
     self.assertEqual(learner.hyperparameters["subsample_count"], 128)
-    model = learner.train(self.gaussians.train)
+    model = learner.train(self.gaussians.train_pd)
 
     max_depth = max([get_tree_depth(t.root, 0) for t in model.get_all_trees()])
     self.assertEqual(max_depth, 7)
 
   def test_max_depth_gaussians_max_depth(self):
     learner = specialized_learners.IsolationForestLearner(
-        features=["f1", "f2"], subsample_ratio=1.0, max_depth=10
+        features=["features.0_of_2", "features.1_of_2"],
+        subsample_ratio=1.0,
+        max_depth=10,
     )
-    model = learner.train(self.gaussians.train)
+    model = learner.train(self.gaussians.train_pd)
 
     max_depth = max([get_tree_depth(t.root, 0) for t in model.get_all_trees()])
     self.assertEqual(max_depth, 10)
@@ -1220,6 +1299,20 @@ class IsolationForestLearnerTest(LearnerTest):
     learner.hyperparameters["subsample_ratio"] = 0.5
     with self.assertRaises(ValueError):
       learner.validate_hyperparameters()
+
+  def test_gaussians_oblique(self):
+    learner = specialized_learners.IsolationForestLearner(
+        features=["features.0_of_2", "features.1_of_2"],
+        split_axis="SPARSE_OBLIQUE",
+        num_trees=5,
+    )
+    model = learner.train(self.gaussians.train_pd)
+    first_tree = model.get_tree(0)
+    first_root = first_tree.root
+    self.assertIsInstance(first_root, node_lib.NonLeaf)
+    self.assertIsInstance(
+        first_root.condition, condition_lib.NumericalSparseObliqueCondition
+    )
 
 
 class UtilityTest(LearnerTest):
