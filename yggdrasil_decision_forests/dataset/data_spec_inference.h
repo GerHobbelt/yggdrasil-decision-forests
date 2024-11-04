@@ -68,14 +68,24 @@ class AbstractDataSpecCreator {
   virtual absl::Status InferColumnsAndTypes(
       const std::vector<std::string>& paths,
       const proto::DataSpecificationGuide& guide,
-      proto::DataSpecification* data_spec) = 0;
+      proto::DataSpecification* data_spec) {
+    return absl::UnimplementedError("Not implemented");
+  }
 
   // Accumulate statistics about each features.
   virtual absl::Status ComputeColumnStatistics(
       const std::vector<std::string>& paths,
       const proto::DataSpecificationGuide& guide,
       proto::DataSpecification* data_spec,
-      proto::DataSpecificationAccumulator* accumulator) = 0;
+      proto::DataSpecificationAccumulator* accumulator) {
+    return absl::UnimplementedError("Not implemented");
+  }
+
+  // End2End function to create a dataspec from a dataset.
+  virtual absl::Status CreateDataspec(
+      const std::vector<std::string>& paths,
+      const proto::DataSpecificationGuide& guide,
+      proto::DataSpecification* data_spec);
 
   // Counts the number of examples.
   virtual absl::StatusOr<int64_t> CountExamples(absl::string_view path) = 0;
@@ -159,6 +169,10 @@ void UpdateComputeSpecDiscretizedNumerical(
 // Update the accumulator with a boolean feature value with a numerical
 // observation.
 void UpdateComputeSpecBooleanFeature(float value, proto::Column* column);
+
+// Update the accumulator with a boolean feature value with a boolean
+// observation.
+void UpdateComputeSpecBooleanFeatureWithBool(bool value, proto::Column* column);
 
 // Update all the columns in a data spec with the appropriate guide information.
 // Used when inferring the column type from a csv file.

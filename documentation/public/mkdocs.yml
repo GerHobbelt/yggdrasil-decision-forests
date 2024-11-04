@@ -46,6 +46,7 @@ nav:
   - ❔ FAQ: faq.md
   - 📖 Glossary: glossary.md
   - 🤸 For Googlers: http://go/ydf
+  - ✒️ Blog: blog/index.md
   - Tasks solved by YDF:
     - Classification: tutorial/classification.ipynb
     - Regression: tutorial/regression.ipynb
@@ -138,6 +139,7 @@ extra_javascript:
 plugins:
   - search
   - autorefs
+  - blog
   - mkdocstrings:
       default_handler: python
       handlers:
@@ -149,6 +151,7 @@ plugins:
             preload_modules:
               - ydf  # For prod
               - yggdrasil_decision_forests # For prod
+              - ydf.util
             show_root_heading: true
             heading_level: 2
             inherited_members: true
@@ -178,6 +181,7 @@ plugins:
   - gen-files:
       scripts:
         - copy_external.py
+        - update_scs_paths.py
 
 extra:
   analytics:

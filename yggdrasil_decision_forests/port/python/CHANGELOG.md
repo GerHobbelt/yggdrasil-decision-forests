@@ -1,10 +1,24 @@
 # Changelog
 
+## NEXT HEAD
+
+### Feature
+
+-   Add support for Avro file for path / distributed training with the "avro:"
+    prefix.
+
 ## HEAD
+
+### Breaking
+
+-   Change typo partial_depepence_plot to partial_dependence_plot on
+    model.analyze().
 
 ### Feature
 
 -   Expose MRR for ranking models.
+-   Add `model.predict_class` to generate the most likely predicted class of
+    classification models.
 
 ## 0.8.0 - 2024-09-23
 

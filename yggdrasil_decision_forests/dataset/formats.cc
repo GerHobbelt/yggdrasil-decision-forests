@@ -67,6 +67,7 @@ const std::vector<Format>& GetFormats() {
     formats->push_back({
         .extension = "tfrecord",
         .prefix = FORMAT_TFE_TFRECORDV2,
+        .prefix_alias = "tfrecord-nocompression",
         .proto_format = proto::FORMAT_TFE_TFRECORDV2,
     });
 
@@ -77,6 +78,12 @@ const std::vector<Format>& GetFormats() {
         .prefix = "tfrecord",
         .prefix_alias = "tfrecordv2+gz+tfe",
         .proto_format = proto::FORMAT_TFE_TFRECORD_COMPRESSED_V2,
+    });
+
+    formats->push_back({
+        .extension = "avro",
+        .prefix = "avro",
+        .proto_format = proto::FORMAT_AVRO,
     });
 
     // Partially computed (e.g. non indexed) dataset cache.

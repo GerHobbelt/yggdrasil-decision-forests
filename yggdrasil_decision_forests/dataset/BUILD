@@ -8,6 +8,7 @@ package(
 cc_library_ydf(
     name = "all_dataset_formats",
     deps = [
+        ":avro_example",
         ":csv_example_reader",
         ":csv_example_writer",
         "//yggdrasil_decision_forests/dataset/tensorflow_no_dep:tf_record_tf_example",
@@ -372,6 +373,47 @@ cc_library_ydf(
     ],
 )
 
+cc_library_ydf(
+    name = "avro",
+    srcs = ["avro.cc"],
+    hdrs = ["avro.h"],
+    deps = [
+        ":data_spec",
+        ":data_spec_cc_proto",
+        ":data_spec_inference",
+        "//yggdrasil_decision_forests/utils:bytestream",
+        "//yggdrasil_decision_forests/utils:filesystem",
+        "//yggdrasil_decision_forests/utils:status_macros",
+        "//yggdrasil_decision_forests/utils:zlib",
+        "@com_google_absl//absl/memory",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+        "@nlohmann_json//:json",
+    ],
+)
+
+cc_library_ydf(
+    name = "avro_example",
+    srcs = ["avro_example.cc"],
+    hdrs = ["avro_example.h"],
+    deps = [
+        ":avro",
+        ":data_spec",
+        ":data_spec_cc_proto",
+        ":data_spec_inference",
+        ":example_reader_interface",
+        "//yggdrasil_decision_forests/utils:sharded_io",
+        "//yggdrasil_decision_forests/utils:status_macros",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/types:optional",
+    ],
+    alwayslink = 1,
+)
+
 # Proto
 # ========
 
@@ -616,6 +658,45 @@ cc_test(
         ":example_builder",
         "//yggdrasil_decision_forests/utils:test",
         "@com_google_absl//absl/types:span",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "avro_test",
+    srcs = ["avro_test.cc"],
+    data = [
+        "//yggdrasil_decision_forests/test_data",
+    ],
+    deps = [
+        ":avro",
+        "//yggdrasil_decision_forests/utils:bytestream",
+        "//yggdrasil_decision_forests/utils:filesystem",
+        "//yggdrasil_decision_forests/utils:logging",
+        "//yggdrasil_decision_forests/utils:test",
+        "//yggdrasil_decision_forests/utils:testing_macros",
+        "@com_google_absl//absl/status",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "avro_example_test",
+    srcs = ["avro_example_test.cc"],
+    data = [
+        "//yggdrasil_decision_forests/test_data",
+    ],
+    deps = [
+        ":avro_example",
+        ":data_spec",
+        ":data_spec_cc_proto",
+        ":data_spec_inference",
+        ":example_reader",
+        "//yggdrasil_decision_forests/utils:filesystem",
+        "//yggdrasil_decision_forests/utils:logging",
+        "//yggdrasil_decision_forests/utils:test",
+        "//yggdrasil_decision_forests/utils:testing_macros",
+        "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
     ],
 )
