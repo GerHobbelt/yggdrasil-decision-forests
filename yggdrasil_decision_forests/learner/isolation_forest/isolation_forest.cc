@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "absl/container/btree_set.h"
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/log/log.h"
 #include "absl/memory/memory.h"
@@ -46,6 +47,7 @@
 #include "yggdrasil_decision_forests/learner/decision_tree/generic_parameters.h"
 #include "yggdrasil_decision_forests/learner/decision_tree/oblique.h"
 #include "yggdrasil_decision_forests/learner/decision_tree/training.h"
+#include "yggdrasil_decision_forests/learner/decision_tree/utils.h"
 #include "yggdrasil_decision_forests/learner/isolation_forest/isolation_forest.pb.h"
 #include "yggdrasil_decision_forests/metric/metric.pb.h"
 #include "yggdrasil_decision_forests/model/abstract_model.h"
@@ -117,16 +119,19 @@ absl::StatusOr<internal::Configuration> BuildConfig(
   return config;
 }
 
-bool CanSplitNumerical(
-    const dataset::VerticalDataset::NumericalColumn* value_container,
-    float na_replacement,
+// Check if this feature can be split.
+template <typename T>
+absl::StatusOr<bool> CanSplit(
+    const dataset::VerticalDataset& train_dataset, int feature_idx,
+    typename T::Format na_replacement,
     const std::vector<UnsignedExampleIdx>& selected_examples) {
+  ASSIGN_OR_RETURN(const T* value_container,
+                   train_dataset.ColumnWithCastWithStatus<T>(feature_idx));
   DCHECK_GT(selected_examples.size(), 1);
   const auto& values = value_container->values();
   float first_example = value_container->IsNa(selected_examples[0])
                             ? na_replacement
                             : values[selected_examples[0]];
-  // Check if this feature can be split.
   for (const auto example_idx : selected_examples) {
     float current_example = value_container->IsNa(example_idx)
                                 ? na_replacement
@@ -138,38 +143,49 @@ bool CanSplitNumerical(
   return false;
 }
 
-// Return the indices of the features that can be split, i.e. where not all
-// values are equal.
-absl::StatusOr<std::vector<int>> FindNontrivialFeatures(
+// Compute the indices of the features that can be split, i.e. where not all
+// values are equal. The indices of the nontrivial features are stored, by
+// column type, in `nontrivial_features`. The total number of nontrivial
+// features is returned.
+absl::StatusOr<int> FindNontrivialFeatures(
     const Configuration& config, const dataset::VerticalDataset& train_dataset,
-    const std::vector<UnsignedExampleIdx>& selected_examples) {
+    const std::vector<UnsignedExampleIdx>& selected_examples,
+    absl::flat_hash_map<dataset::proto::ColumnType, std::vector<int>>*
+        nontrivial_features) {
   DCHECK_GT(selected_examples.size(), 1);
+  nontrivial_features->clear();
+  size_t num_nontrivial_features = 0;
   const auto& data_spec = train_dataset.data_spec();
-  std::vector<int> nontrivial_features;
-  nontrivial_features.reserve(config.config_link.numerical_features_size());
   for (const auto& feature_idx : config.config_link.features()) {
     const auto& feature = data_spec.columns(feature_idx);
+    const auto feature_type = feature.type();
     bool can_split;
-    switch (feature.type()) {
+    switch (feature_type) {
       case dataset::proto::NUMERICAL: {
-        ASSIGN_OR_RETURN(
-            const dataset::VerticalDataset::NumericalColumn* value_container,
-            train_dataset.ColumnWithCastWithStatus<
-                dataset::VerticalDataset::NumericalColumn>(feature_idx));
-        can_split = CanSplitNumerical(
-            value_container, feature.numerical().mean(), selected_examples);
+        ASSIGN_OR_RETURN(can_split,
+                         CanSplit<dataset::VerticalDataset::NumericalColumn>(
+                             train_dataset, feature_idx,
+                             feature.numerical().mean(), selected_examples));
         break;
       }
-      case dataset::proto::CATEGORICAL:
-        LOG_FIRST_N(INFO, 1) << "Ignoring columns of unsupported type "
-                             << dataset::proto::ColumnType_Name(feature.type())
-                             << " e.g. " << feature.name();
-        continue;
-      case dataset::proto::BOOLEAN:
-        LOG_FIRST_N(INFO, 1) << "Ignoring columns of unsupported type "
-                             << dataset::proto::ColumnType_Name(feature.type())
-                             << " e.g. " << feature.name();
-        continue;
+      case dataset::proto::BOOLEAN: {
+        const bool na_replacement =
+            feature.boolean().count_true() >= feature.boolean().count_false();
+        ASSIGN_OR_RETURN(
+            can_split,
+            CanSplit<dataset::VerticalDataset::BooleanColumn>(
+                train_dataset, feature_idx, na_replacement, selected_examples));
+        break;
+      }
+      case dataset::proto::CATEGORICAL: {
+        const int64_t na_replacement =
+            feature.categorical().most_frequent_value();
+        ASSIGN_OR_RETURN(
+            can_split,
+            CanSplit<dataset::VerticalDataset::CategoricalColumn>(
+                train_dataset, feature_idx, na_replacement, selected_examples));
+        break;
+      }
       case dataset::proto::CATEGORICAL_SET:
         LOG_FIRST_N(INFO, 1) << "Ignoring columns of unsupported type "
                              << dataset::proto::ColumnType_Name(feature.type())
@@ -191,10 +207,11 @@ absl::StatusOr<std::vector<int>> FindNontrivialFeatures(
             dataset::proto::ColumnType_Name(feature.type()), feature.name()));
     }
     if (can_split) {
-      nontrivial_features.push_back(feature_idx);
+      (*nontrivial_features)[feature_type].push_back(feature_idx);
+      num_nontrivial_features++;
     }
   }
-  return nontrivial_features;
+  return num_nontrivial_features;
 }
 }  // namespace
 
@@ -207,38 +224,54 @@ absl::StatusOr<bool> FindSplit(
   if (selected_examples.size() <= 1) {
     return false;
   }
+  // TODO: Consider getting rid of this heap allocation
+  absl::flat_hash_map<dataset::proto::ColumnType, std::vector<int>>
+      nontrivial_features;
 
   ASSIGN_OR_RETURN(
-      const std::vector<int> nontrivial_features,
-      FindNontrivialFeatures(config, train_dataset, selected_examples));
-  if (nontrivial_features.empty()) {
+      const auto num_nontrivial_features,
+      FindNontrivialFeatures(config, train_dataset, selected_examples,
+                             &nontrivial_features));
+  if (num_nontrivial_features == 0) {
     return false;
   }
-  // Sample a non-trivial feature. Note that algorithm guarantees that there
-  // will be a split on a feature of the same type as the sampled feature, but
-  // the split may not involve this particular feature. This is because splits
-  // involving multiple feature (i.e. oblique splits) use a separate logic for
-  // sampling features.
-  const size_t feature_idx = nontrivial_features[absl::Uniform<size_t>(
-      *rnd, 0, nontrivial_features.size())];
-  const auto& data_spec = train_dataset.data_spec();
-  const auto& feature = data_spec.columns(feature_idx);
-  switch (feature.type()) {
+  // Sample a non-trivial feature type uniformly among the features. Note that
+  // the number of column types is a small constant, so this algorithm is
+  // reasonable.
+  dataset::proto::ColumnType selected_feature_type;
+  // For oblique numerical splits, this will not be used.
+  int selected_feature_idx;
+  const size_t random_idx =
+      absl::Uniform<size_t>(*rnd, 0, num_nontrivial_features);
+  size_t current_idx = 0;
+  for (const auto& features_of_type : nontrivial_features) {
+    if (random_idx < current_idx + features_of_type.second.size()) {
+      selected_feature_type = features_of_type.first;
+      selected_feature_idx = features_of_type.second[random_idx - current_idx];
+      break;
+    }
+    current_idx += features_of_type.second.size();
+  }
+  DCHECK_NE(selected_feature_type, dataset::proto::ColumnType::UNKNOWN);
+  switch (selected_feature_type) {
     case dataset::proto::NUMERICAL: {
+      const auto& nontrivial_numerical_features =
+          nontrivial_features.find(selected_feature_type);
+      DCHECK(nontrivial_numerical_features != nontrivial_features.end());
       switch (config.if_config->decision_tree().split_axis_case()) {
         case decision_tree::proto::DecisionTreeTrainingConfig::SplitAxisCase::
             SPLIT_AXIS_NOT_SET:
         case decision_tree::proto::DecisionTreeTrainingConfig::SplitAxisCase::
             kAxisAlignedSplit:
           RETURN_IF_ERROR(SetRandomSplitNumericalAxisAligned(
-              feature_idx, config, train_dataset, selected_examples, node,
-              rnd));
+              selected_feature_idx, config, train_dataset, selected_examples,
+              node, rnd));
           break;
         case decision_tree::proto::DecisionTreeTrainingConfig::SplitAxisCase::
             kSparseObliqueSplit: {
           RETURN_IF_ERROR(SetRandomSplitNumericalSparseOblique(
-              nontrivial_features, config, train_dataset, selected_examples,
-              node, rnd));
+              nontrivial_numerical_features->second, config, train_dataset,
+              selected_examples, node, rnd));
           break;
         }
         default:
@@ -248,10 +281,28 @@ absl::StatusOr<bool> FindSplit(
       }
       break;
     }
+    case dataset::proto::BOOLEAN: {
+      const auto& nontrivial_boolean_features =
+          nontrivial_features.find(selected_feature_type);
+      DCHECK(nontrivial_boolean_features != nontrivial_features.end());
+      RETURN_IF_ERROR(FindSplitBoolean(selected_feature_idx, config,
+                                       train_dataset, selected_examples, node,
+                                       rnd));
+      break;
+    }
+    case dataset::proto::CATEGORICAL: {
+      const auto& nontrivial_categorical_features =
+          nontrivial_features.find(selected_feature_type);
+      DCHECK(nontrivial_categorical_features != nontrivial_features.end());
+      RETURN_IF_ERROR(FindSplitCategorical(selected_feature_idx, config,
+                                           train_dataset, selected_examples,
+                                           node, rnd));
+      break;
+    }
     default:
       return absl::InvalidArgumentError(absl::Substitute(
-          "Unsupported type $0 for feature $1",
-          dataset::proto::ColumnType_Name(feature.type()), feature.name()));
+          "Unsupported type $0",
+          dataset::proto::ColumnType_Name(selected_feature_type)));
   }
   return true;
 }
@@ -276,6 +327,7 @@ absl::Status SetRandomSplitNumericalSparseOblique(
   // (which is likely indicative of an issue with the splitter).
   const int maximum__num_trials = 100 * nontrivial_features.size();
   int8_t unused_monotonic_direction;
+  
   for (int i = 0; i < maximum__num_trials; i++) {
     decision_tree::internal::SampleProjection(
         nontrivial_features, config.if_config->decision_tree(),
@@ -340,7 +392,7 @@ absl::Status SetRandomSplitNumericalSparseOblique(
 }
 
 absl::Status SetRandomSplitNumericalAxisAligned(
-    int feature_idx, const Configuration& config,
+    const int feature_idx, const Configuration& config,
     const dataset::VerticalDataset& train_dataset,
     const std::vector<UnsignedExampleIdx>& selected_examples,
     decision_tree::NodeWithChildren* node, utils::RandomEngine* rnd) {
@@ -372,7 +424,7 @@ absl::Status SetRandomSplitNumericalAxisAligned(
     }
   }
   // `feature_idx` must be a nontrivial feature.
-  DCHECK_NE(min_value, max_value);
+  DCHECK_LT(min_value, max_value);
   // Randomly select a threshold in (min_value, max_value).
   const float threshold = std::uniform_real_distribution<float>(
       std::nextafter(min_value, std::numeric_limits<float>::max()),
@@ -401,6 +453,134 @@ absl::Status SetRandomSplitNumericalAxisAligned(
   condition->mutable_condition()->mutable_higher_condition()->set_threshold(
       threshold);
   condition->set_na_value(na_replacement >= threshold);
+  condition->set_num_training_examples_without_weight(selected_examples.size());
+  condition->set_num_pos_training_examples_without_weight(num_pos_examples);
+  return absl::OkStatus();
+}
+
+absl::Status FindSplitBoolean(
+    const int feature_idx, const Configuration& config,
+    const dataset::VerticalDataset& train_dataset,
+    const std::vector<UnsignedExampleIdx>& selected_examples,
+    decision_tree::NodeWithChildren* node, utils::RandomEngine* rnd) {
+  auto& col_spec = train_dataset.data_spec().columns(feature_idx);
+  DCHECK_EQ(col_spec.type(), dataset::proto::BOOLEAN);
+  DCHECK_GT(selected_examples.size(), 0);
+
+  // Positive values go to the positive branch, negative go to the negative
+  // branch, NA goes to the majority side.
+  ASSIGN_OR_RETURN(
+      const auto* value_container,
+      train_dataset
+          .ColumnWithCastWithStatus<dataset::VerticalDataset::BooleanColumn>(
+              feature_idx));
+  const bool na_replacement =
+      col_spec.boolean().has_count_true() >= col_spec.boolean().count_false();
+  UnsignedExampleIdx num_pos_examples = 0;
+  for (const auto example_idx : selected_examples) {
+    if (value_container->IsTrue(example_idx) ||
+        (na_replacement && value_container->IsNa(example_idx))) {
+      num_pos_examples++;
+    }
+  }
+
+  DCHECK_GT(num_pos_examples, 0);
+  DCHECK_LT(num_pos_examples, selected_examples.size());
+
+  // Set split.
+  auto* condition = node->mutable_node()->mutable_condition();
+  condition->set_attribute(feature_idx);
+  condition->mutable_condition()->mutable_true_value_condition();
+  condition->set_na_value(na_replacement);
+  condition->set_num_training_examples_without_weight(selected_examples.size());
+  condition->set_num_pos_training_examples_without_weight(num_pos_examples);
+  return absl::OkStatus();
+}
+
+absl::Status FindSplitCategorical(
+    const int feature_idx, const Configuration& config,
+    const dataset::VerticalDataset& train_dataset,
+    const std::vector<UnsignedExampleIdx>& selected_examples,
+    decision_tree::NodeWithChildren* node, utils::RandomEngine* rnd) {
+  const auto& col_spec = train_dataset.data_spec().columns(feature_idx);
+  const auto na_replacement = col_spec.categorical().most_frequent_value();
+  DCHECK_EQ(col_spec.type(), dataset::proto::CATEGORICAL);
+  DCHECK_GT(selected_examples.size(), 0);
+
+  ASSIGN_OR_RETURN(
+      const auto* value_container,
+      train_dataset.ColumnWithCastWithStatus<
+          dataset::VerticalDataset::CategoricalColumn>(feature_idx));
+  const auto& values = value_container->values();
+  const int num_unique_feature_values =
+      col_spec.categorical().number_of_unique_values();
+
+  // if num_unique_feature_values is very large (likely because of a user
+  // feeding pre-integerized values), the following might be memory-hungry.
+  std::vector<UnsignedExampleIdx> active_feature_values_count(
+      num_unique_feature_values, 0);
+  int num_active_feature_values = 0;
+  for (const auto example_idx : selected_examples) {
+    auto value = values[example_idx];
+    if (value == dataset::VerticalDataset::CategoricalColumn::kNaValue) {
+      value = na_replacement;
+    }
+    if (active_feature_values_count[value] == 0) {
+      num_active_feature_values++;
+    }
+    active_feature_values_count[value]++;
+  }
+  DCHECK_GT(num_active_feature_values, 0);
+  int ensure_chosen_idx = absl::Uniform(*rnd, 0, num_active_feature_values);
+  int ensure_not_chosen_idx =
+      (ensure_chosen_idx +
+       absl::Uniform(*rnd, 1, num_active_feature_values - 1)) %
+      num_active_feature_values;
+  std::vector<int> chosen_values = {};
+  chosen_values.reserve(num_unique_feature_values);
+
+  int selected_values_idx = 0;
+  int num_pos_examples = 0;
+  bool na_is_chosen = false;
+  // Flip a fair coin for every value in the selected examples.
+  for (int item = 0; item < num_unique_feature_values; item++) {
+    if (active_feature_values_count[item] > 0) {
+      bool choose;
+      if (selected_values_idx == ensure_not_chosen_idx) {
+        choose = false;
+      } else if (selected_values_idx == ensure_chosen_idx) {
+        choose = true;
+      } else {
+        choose = absl::Bernoulli(*rnd, 0.5);
+      }
+      if (choose) {
+        chosen_values.push_back(item);
+        num_pos_examples += active_feature_values_count[item];
+        if (item == na_replacement) {
+          na_is_chosen = true;
+        }
+      }
+      selected_values_idx++;
+    } else {
+      // Randomly pick from the non-observed values for a more balanced split.
+      if (absl::Bernoulli(*rnd, 0.5)) {
+        chosen_values.push_back(item);
+        if (item == na_replacement) {
+          na_is_chosen = true;
+        }
+      }
+    }
+  }
+  DCHECK(!chosen_values.empty());
+  DCHECK_GT(num_pos_examples, 0);
+  DCHECK_LT(num_pos_examples, selected_examples.size());
+
+  // Set split.
+  auto* condition = node->mutable_node()->mutable_condition();
+  condition->set_attribute(feature_idx);
+  decision_tree::SetPositiveAttributeSetOfCategoricalContainsCondition(
+      chosen_values, num_unique_feature_values, condition);
+  condition->set_na_value(na_is_chosen);
   condition->set_num_training_examples_without_weight(selected_examples.size());
   condition->set_num_pos_training_examples_without_weight(num_pos_examples);
   return absl::OkStatus();

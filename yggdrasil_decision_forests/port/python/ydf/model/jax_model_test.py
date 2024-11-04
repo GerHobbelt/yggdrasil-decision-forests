@@ -434,7 +434,7 @@ class JaxModelTest(parameterized.TestCase):
             "cs1": {"<OOD>": 0, "a": 1, "b": 2, "c": 3},
             "cs2": {"<OOD>": 0, "a": 1, "b": 2, "c": 3},
             "cs3": {"<OOD>": 0, "1": 1, "2": 2, "3": 3},
-            "cs4": {"<OOD>": 0, "False": 1, "True": 2},
+            "cs4": {"<OOD>": 0, "false": 1, "true": 2},
         },
     )
 
@@ -961,7 +961,9 @@ class ToJaxTest(parameterized.TestCase):
               "split_axis": "SPARSE_OBLIQUE",
               "sparse_oblique_normalization": "STANDARD_DEVIATION",
           },
-          False,  # TODO: Check conversion when bug solved.
+          # TODO: b/364685350 - Re-enable when compiler fix oss sync
+          # is released.
+          False
       ),
   )
   def test_to_jax_function(
@@ -1013,6 +1015,7 @@ class ToJaxTest(parameterized.TestCase):
       jax_predictions = jax_model.predict(input_values)
 
     # Test predictions
+    # Note: This test sometime fails with OOS build.
     np.testing.assert_allclose(
         jax_predictions,
         ydf_predictions,

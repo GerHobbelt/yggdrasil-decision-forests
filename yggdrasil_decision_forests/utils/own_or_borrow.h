@@ -29,7 +29,7 @@ template <typename T>
 class VectorOwnOrBorrow {
  public:
   // Empty owned.
-  VectorOwnOrBorrow() : values_(owned_values_), owner_(true) {}
+  VectorOwnOrBorrow() = default;
 
   // Not copyable, not movable (for now).
   VectorOwnOrBorrow(const VectorOwnOrBorrow&) = delete;
@@ -58,10 +58,21 @@ class VectorOwnOrBorrow {
 
   size_t size() const { return values_.size(); }
 
+  // Is the data empty.
+  bool empty() const { return values_.empty(); }
+
+  // Releases the data. If the data was owned, the data is cleared (e.g.,
+  // released from memory). If the data was borrowed, the data is released.
+  void release() {
+    owned_values_.clear();
+    values_ = owned_values_;
+    owner_ = true;
+  }
+
  private:
-  absl::Span<const T> values_;
   std::vector<T> owned_values_;
-  bool owner_;
+  absl::Span<const T> values_ = owned_values_;
+  bool owner_ = true;
 };
 
 }  // namespace yggdrasil_decision_forests::utils

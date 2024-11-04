@@ -16,7 +16,7 @@
 
 import os
 import signal
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from absl import logging
 from absl.testing import absltest
@@ -585,6 +585,64 @@ class RandomForestLearnerTest(LearnerTest):
         learner.hyperparameters.items(),
     )
 
+  def test_unicode_dataset(self):
+    data = {
+        "\u0080feature": np.array(
+            [["\u0080a", "\u0080b"], ["\u0080c", "\u0080d"]]
+        ),
+        "label": np.array([0, 1]),
+    }
+    learner = specialized_learners.RandomForestLearner(
+        label="label", min_vocab_frequency=1
+    )
+    model = learner.train(data)
+
+    expected_columns = [
+        ds_pb.Column(
+            name="\u0080feature.0_of_2",
+            type=ds_pb.ColumnType.CATEGORICAL,
+            dtype=ds_pb.DType.DTYPE_BYTES,
+            count_nas=0,
+            categorical=ds_pb.CategoricalSpec(
+                items={
+                    "<OOD>": ds_pb.CategoricalSpec.VocabValue(index=0, count=0),
+                    "\u0080a": ds_pb.CategoricalSpec.VocabValue(
+                        index=1, count=1
+                    ),
+                    "\u0080c": ds_pb.CategoricalSpec.VocabValue(
+                        index=2, count=1
+                    ),
+                },
+                number_of_unique_values=3,
+            ),
+            is_unstacked=True,
+        ),
+        ds_pb.Column(
+            name="\u0080feature.1_of_2",
+            type=ds_pb.ColumnType.CATEGORICAL,
+            dtype=ds_pb.DType.DTYPE_BYTES,
+            count_nas=0,
+            categorical=ds_pb.CategoricalSpec(
+                items={
+                    "<OOD>": ds_pb.CategoricalSpec.VocabValue(index=0, count=0),
+                    "\u0080b": ds_pb.CategoricalSpec.VocabValue(
+                        index=1, count=1
+                    ),
+                    "\u0080d": ds_pb.CategoricalSpec.VocabValue(
+                        index=2, count=1
+                    ),
+                },
+                number_of_unique_values=3,
+            ),
+            is_unstacked=True,
+        ),
+    ]
+    # Skip the first column that contains the label.
+    self.assertEqual(model.data_spec().columns[1:], expected_columns)
+
+    predictions = model.predict(data)
+    self.assertEqual(predictions.shape, (2,))
+
   def test_multidimensional_training_dataset(self):
     data = {
         "feature": np.array([[0, 1, 2, 3], [4, 5, 6, 7]]),
@@ -867,6 +925,19 @@ class RandomForestLearnerTest(LearnerTest):
           "feature": np.array([[0], [1]]),
       })
 
+  def test_analyze_ensure_maximum_duration(self):
+    # Create an analysis that would take a lot of time if not limited in time.
+    def create_dataset(n: int) -> Dict[str, np.ndarray]:
+      return {
+          "feature": np.random.uniform(size=(n, 100)),
+          "label": np.random.uniform(size=(n,)),
+      }
+
+    model = specialized_learners.RandomForestLearner(
+        label="label", task=generic_learner.Task.REGRESSION
+    ).train(create_dataset(1_000))
+    _ = model.analyze(create_dataset(100_000))
+
 
 class CARTLearnerTest(LearnerTest):
 
@@ -992,6 +1063,41 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
     self.assertGreaterEqual(evaluation.ndcg, 0.70)
     self.assertLessEqual(evaluation.ndcg, 0.74)
 
+  @parameterized.named_parameters(
+      {
+          "testcase_name": "ndcg@2",
+          "truncation": 2,
+          "expected_ndcg": 0.723,
+          "delta": 0.025,
+      },
+      {
+          "testcase_name": "ndcg@5",
+          "truncation": 5,
+          "expected_ndcg": 0.716,
+          "delta": 0.024,
+      },
+      {
+          "testcase_name": "ndcg@10",
+          "truncation": 10,
+          "expected_ndcg": 0.716,
+          "delta": 0.03,
+      },
+  )
+  def test_ranking_ndcg_truncation(self, truncation, expected_ndcg, delta):
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label="LABEL",
+        ranking_group="GROUP",
+        task=generic_learner.Task.RANKING,
+        ndcg_truncation=truncation,
+    )
+
+    model = learner.train(self.synthetic_ranking.train_path)
+
+    evaluation = model.evaluate(
+        self.synthetic_ranking.test_pd, ndcg_truncation=5
+    )
+    self.assertAlmostEqual(evaluation.ndcg, expected_ndcg, delta=delta)
+
   def test_adult_sparse_oblique(self):
     learner = specialized_learners.GradientBoostedTreesLearner(
         label="income",
@@ -1089,6 +1195,13 @@ class GradientBoostedTreesLearnerTest(LearnerTest):
 
     logging.info("evaluation:\n%s", evaluation)
     self.assertAlmostEqual(evaluation.accuracy, 0.87, 1)
+
+  def test_with_validation_missing_columns_fails(self):
+    with self.assertRaisesRegex(ValueError, "Missing required column 'age'"):
+      invalid_adult_test_pd = self.adult.test_pd.drop(["age"], axis=1)
+      specialized_learners.GradientBoostedTreesLearner(
+          label="income", num_trees=50
+      ).train(self.adult.train_pd, valid=invalid_adult_test_pd)
 
   def test_with_validation_path(self):
     evaluation = (

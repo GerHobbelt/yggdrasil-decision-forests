@@ -44,7 +44,7 @@ constexpr char kInvalidDataMessage[] =
 static const uint32_t kMaskDelta = 0xa282ead8ul;
 
 // Mask applied by TF Record over the CRCs.
-// See tensorflow/tsl/lib/hash/crc32c.h
+// See tensorflow/compiler/xla/tsl/lib/hash/crc32c.h
 // Note: TF Record does NOT compute CRC over a string containing a CRC.
 inline uint32_t Mask(const uint32_t crc) {
   return ((crc >> 15) | (crc << 17)) + kMaskDelta;
@@ -132,8 +132,13 @@ absl::Status TFRecordReader::Close() {
 }
 
 absl::StatusOr<std::unique_ptr<TFRecordWriter>> TFRecordWriter::Create(
-    absl::string_view path) {
-  ASSIGN_OR_RETURN(auto stream, file::OpenOutputFile(path));
+    absl::string_view path, bool compressed) {
+  ASSIGN_OR_RETURN(std::unique_ptr<utils::OutputByteStream> stream,
+                   file::OpenOutputFile(path));
+  if (compressed) {
+    ASSIGN_OR_RETURN(stream,
+                     utils::GZipOutputByteStream::Create(std::move(stream)));
+  }
   return absl::make_unique<TFRecordWriter>(std::move(stream));
 }
 

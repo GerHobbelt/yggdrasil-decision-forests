@@ -232,7 +232,10 @@ class GenericModelTest(parameterized.TestCase):
         test_utils.ydf_test_data_path(), "dataset", "adult_test.csv"
     )
     test_df = pd.read_csv(dataset_path)
-    analysis = self.adult_binary_class_gbdt.analyze(test_df, num_bins=4)
+    # Large maximum duration reduces test flakiness.
+    analysis = self.adult_binary_class_gbdt.analyze(
+        test_df, num_bins=4, maximum_duration=600
+    )
 
     # Checked against report.
     self.assertSetEqual(
@@ -1006,6 +1009,52 @@ Use `model.describe()` for more details
     evaluation_fast = self.adult_binary_class_gbdt.evaluate(test_df)
 
     self.assertEqual(evaluation_fast, evaluation_slow)
+
+  @parameterized.named_parameters(
+      {
+          "testcase_name": "ndcg@5",
+          "truncation": 5,
+          "expected_ndcg": 0.7204528553,
+      },
+      {
+          "testcase_name": "ndcg@2",
+          "truncation": 2,
+          "expected_ndcg": 0.6304857312,
+      },
+      {
+          "testcase_name": "ndcg@10",
+          "truncation": 10,
+          "expected_ndcg": 0.8384147895,
+      },
+  )
+  def test_evaluate_ranking_ndcg_truncation(self, truncation, expected_ndcg):
+    evaluation = self.synthetic_ranking_gbdt.evaluate(
+        self.synthetic_ranking_gbdt_test_ds, ndcg_truncation=truncation
+    )
+    self.assertAlmostEqual(evaluation.ndcg, expected_ndcg)
+
+  @parameterized.named_parameters(
+      {
+          "testcase_name": "mrr@5",
+          "truncation": 5,
+          "expected_mrr": 0.8242574257,
+      },
+      {
+          "testcase_name": "mrr@2",
+          "truncation": 2,
+          "expected_mrr": 0.7920792079,
+      },
+      {
+          "testcase_name": "mrr@10",
+          "truncation": 10,
+          "expected_mrr": 0.8259075907,
+      },
+  )
+  def test_evaluate_ranking_mrr_truncation(self, truncation, expected_mrr):
+    evaluation = self.synthetic_ranking_gbdt.evaluate(
+        self.synthetic_ranking_gbdt_test_ds, mrr_truncation=truncation
+    )
+    self.assertAlmostEqual(evaluation.mrr, expected_mrr)
 
 
 if __name__ == "__main__":

@@ -60,8 +60,9 @@ class Task(enum.Enum):
   Attributes:
     CLASSIFICATION: Predict a categorical label i.e., an item of an enumeration.
     REGRESSION: Predict a numerical label i.e., a quantity.
-    RANKING: Rank items by label values. The label is expected to be between 0
-      and 4 with NDCG semantic (0: completely unrelated, 4: perfect match).
+    RANKING: Rank items by label values. When using default NDCG settings, the
+      label is expected to be between 0 and 4 with NDCG semantic (0: completely
+      unrelated, 4: perfect match).
     CATEGORICAL_UPLIFT: Predicts the incremental impact of a treatment on a
       categorical outcome.
     NUMERICAL_UPLIFT: Predicts the incremental impact of a treatment on a
@@ -415,9 +416,11 @@ Use `model.describe()` for more details
     ```
 
     Args:
-      data: Dataset. Can be a dictionary of list or numpy array of values,
-        Pandas DataFrame, or a VerticalDataset. If the dataset contains the
-        label column, that column is ignored.
+      data: Dataset. Supported formats: VerticalDataset, (typed) path, list of
+        (typed) paths, Pandas DataFrame, Xarray Dataset, TensorFlow Dataset,
+        PyGrain DataLoader and Dataset (experimental, Linux only), dictionary of
+        string to NumPy array or lists. If the dataset contains the label
+        column, that column is ignored.
       use_slow_engine: If true, uses the slow engine for making predictions. The
         slow engine of YDF is an order of magnitude slower than the other
         prediction engines. There exist very rare edge cases where predictions
@@ -452,6 +455,8 @@ Use `model.describe()` for more details
       label: Optional[str] = None,
       group: Optional[str] = None,
       bootstrapping: Union[bool, int] = False,
+      ndcg_truncation: int = 5,
+      mrr_truncation: int = 5,
       evaluation_task: Optional[Task] = None,
       use_slow_engine: bool = False,
       num_threads: Optional[int] = None,
@@ -501,8 +506,10 @@ Use `model.describe()` for more details
     ```
 
     Args:
-      data: Dataset. Can be a dictionary of list or numpy array of values,
-        Pandas DataFrame, or a VerticalDataset.
+      data: Dataset. Supported formats: VerticalDataset, (typed) path, list of
+        (typed) paths, Pandas DataFrame, Xarray Dataset, TensorFlow Dataset,
+        PyGrain DataLoader and Dataset (experimental, Linux only), dictionary of
+        string to NumPy array or lists.
       weighted: If true, the evaluation is weighted according to the training
         weights. If false, the evaluation is non-weighted. b/351279797: Change
         default to weights=True.
@@ -519,6 +526,8 @@ Use `model.describe()` for more details
         to an integer, it specifies the number of bootstrapping samples to use.
         In this case, if the number is less than 100, an error is raised as
         bootstrapping will not yield useful results.
+      ndcg_truncation: Controls at which ranking position the NDCG loss should
+        be truncated. Default to 5. Ignored for non-ranking models.
       evaluation_task: Deprecated. Use `task` instead.
       use_slow_engine: If true, uses the slow engine for making predictions. The
         slow engine of YDF is an order of magnitude slower than the other
@@ -599,6 +608,11 @@ Use `model.describe()` for more details
       options_proto = metric_pb2.EvaluationOptions(
           bootstrapping_samples=bootstrapping_samples,
           task=task._to_proto_type(),  # pylint: disable=protected-access
+          ranking=metric_pb2.EvaluationOptions.Ranking(
+              ndcg_truncation=ndcg_truncation, mrr_truncation=mrr_truncation
+          )
+          if task == Task.RANKING
+          else None,
           num_threads=num_threads,
       )
 
@@ -643,8 +657,10 @@ Use `model.describe()` for more details
     ```
 
     Args:
-      single_example: Example to explain. Can be a dictionary of lists or numpy
-        arrays of values, Pandas DataFrame, or a VerticalDataset.
+      single_example: Example to explain. Supported formats: VerticalDataset,
+        (typed) path, list of (typed) paths, Pandas DataFrame, Xarray Dataset,
+        TensorFlow Dataset, PyGrain DataLoader and Dataset (experimental, Linux
+        only), dictionary of string to NumPy array or lists.
 
     Returns:
       Prediction explanation.
@@ -668,6 +684,7 @@ Use `model.describe()` for more details
       conditional_expectation_plot: bool = True,
       permutation_variable_importance_rounds: int = 1,
       num_threads: Optional[int] = None,
+      maximum_duration: Optional[float] = 20,
   ) -> analysis.Analysis:
     """Analyzes a model on a test dataset.
 
@@ -699,8 +716,10 @@ Use `model.describe()` for more details
     ```
 
     Args:
-      data: Dataset. Can be a dictionary of list or numpy array of values,
-        Pandas DataFrame, or a VerticalDataset.
+      data: Dataset. Supported formats: VerticalDataset, (typed) path, list of
+        (typed) paths, Pandas DataFrame, Xarray Dataset, TensorFlow Dataset,
+        PyGrain DataLoader and Dataset (experimental, Linux only), dictionary of
+        string to NumPy array or lists.
       sampling: Ratio of examples to use for the analysis. The analysis can be
         expensive to compute. On large datasets, use a small sampling value e.g.
         0.01.
@@ -717,6 +736,8 @@ Use `model.describe()` for more details
         If permutation_variable_importance_rounds=0, disables the computation of
         permutation variable importances.
       num_threads: Number of threads to use to compute the analysis.
+      maximum_duration: Maximum duration of the analysis in seconds. Note that
+        the analysis can last a little longer than this value.
 
     Returns:
       Model analysis.
@@ -732,6 +753,7 @@ Use `model.describe()` for more details
 
       options_proto = model_analysis_pb2.Options(
           num_threads=num_threads,
+          maximum_duration_seconds=maximum_duration,
           pdp=model_analysis_pb2.Options.PlotConfig(
               enabled=partial_depepence_plot,
               example_sampling=sampling,
@@ -1445,7 +1467,7 @@ Use `model.describe()` for more details
     effective_dataspec = self._model.data_spec()
 
     def find_existing_or_add_column(
-        semantic: Optional[data_spec_pb2.ColumnType],
+        semantic: Optional[Any],
         name: Optional[str],
         default_col_idx: int,
         usage: str,
