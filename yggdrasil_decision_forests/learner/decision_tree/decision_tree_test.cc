@@ -19,6 +19,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <random>
 #include <string>
@@ -81,20 +82,17 @@ struct FakeLabelStats : LabelStats {};
 // A fake consumer that persistently fails to find a valid attribute.
 SplitterWorkResponse FakeFindBestConditionConcurrentConsumerAlwaysInvalid(
     SplitterWorkRequest request) {
-  return SplitterWorkResponse{
-      .manager_data = request.manager_data,
-      .status = SplitSearchResult::kInvalidAttribute,
-  };
+  return SplitterWorkResponse(request.manager_data,
+                              SplitSearchResult::kInvalidAttribute, {});
 }
 
 // A fake consumer that sets the split score to 10 times the request index.
 SplitterWorkResponse FakeFindBestConditionConcurrentConsumerMultiplicative(
     SplitterWorkRequest request) {
-  SplitterWorkResponse response{
-      .manager_data = request.manager_data,
-      .status = SplitSearchResult::kBetterSplitFound,
-  };
-  request.condition->set_split_score(request.attribute_idx * 10.f);
+  SplitterWorkResponse response(request.manager_data,
+                                SplitSearchResult::kBetterSplitFound,
+                                absl::make_unique<proto::NodeCondition>());
+  response.condition->set_split_score(request.attribute_idx * 10.f);
   return response;
 }
 
@@ -102,14 +100,13 @@ SplitterWorkResponse FakeFindBestConditionConcurrentConsumerMultiplicative(
 // 10 times the attribute_idx otherwise.
 SplitterWorkResponse FakeFindBestConditionConcurrentConsumerAlternate(
     SplitterWorkRequest request) {
-  auto response = SplitterWorkResponse{
-      .manager_data = request.manager_data,
-      .status = SplitSearchResult::kBetterSplitFound,
-  };
+  auto response = SplitterWorkResponse(
+      request.manager_data, SplitSearchResult::kBetterSplitFound,
+      absl::make_unique<proto::NodeCondition>());
   if (request.attribute_idx % 2 == 0) {
     response.status = SplitSearchResult::kInvalidAttribute;
   }
-  request.condition->set_split_score(request.attribute_idx * 10.f);
+  response.condition->set_split_score(request.attribute_idx * 10.f);
   return response;
 }
 
@@ -2073,10 +2070,9 @@ TEST(DecisionTree, FindBestConditionConcurrentManager_NoFeatures) {
 
   SplitterConcurrencySetup setup{
       .num_threads = internal_config.num_threads,
-      .split_finder_processor =
-          absl::make_unique<SplitterFinderStreamProcessor>(
-              "SplitFinder", internal_config.num_threads,
-              FakeFindBestConditionConcurrentConsumerMultiplicative)};
+      .split_finder_processor = std::make_unique<SplitterFinderStreamProcessor>(
+          "SplitFinder", internal_config.num_threads,
+          FakeFindBestConditionConcurrentConsumerMultiplicative)};
   setup.split_finder_processor->StartWorkers();
 
   // Test case: Features are valid and scores are based on feature id, but
@@ -2114,10 +2110,9 @@ TEST(DecisionTree, FindBestConditionConcurrentManager_AlwaysInvalid) {
 
   SplitterConcurrencySetup setup{
       .num_threads = internal_config.num_threads,
-      .split_finder_processor =
-          absl::make_unique<SplitterFinderStreamProcessor>(
-              "SplitFinder", internal_config.num_threads,
-              FakeFindBestConditionConcurrentConsumerAlwaysInvalid)};
+      .split_finder_processor = std::make_unique<SplitterFinderStreamProcessor>(
+          "SplitFinder", internal_config.num_threads,
+          FakeFindBestConditionConcurrentConsumerAlwaysInvalid)};
   setup.split_finder_processor->StartWorkers();
 
   // Test case: All features are invalid.
@@ -2130,7 +2125,6 @@ TEST(DecisionTree, FindBestConditionConcurrentManager_AlwaysInvalid) {
 
   EXPECT_EQ(cache.splitter_cache_list.size(), 2);
   EXPECT_EQ(cache.durable_response_list.size(), 20);
-  EXPECT_EQ(cache.condition_list.size(), 4);
   EXPECT_FALSE(result);
 }
 
@@ -2156,10 +2150,9 @@ TEST(DecisionTree, FindBestConditionConcurrentManager_Multiplicative) {
 
   SplitterConcurrencySetup setup{
       .num_threads = internal_config.num_threads,
-      .split_finder_processor =
-          absl::make_unique<SplitterFinderStreamProcessor>(
-              "SplitFinder", internal_config.num_threads,
-              FakeFindBestConditionConcurrentConsumerMultiplicative)};
+      .split_finder_processor = std::make_unique<SplitterFinderStreamProcessor>(
+          "SplitFinder", internal_config.num_threads,
+          FakeFindBestConditionConcurrentConsumerMultiplicative)};
   setup.split_finder_processor->StartWorkers();
 
   // Test case: Features are valid and scores are based on feature id, but
@@ -2210,10 +2203,9 @@ TEST(DecisionTree, FindBestConditionConcurrentManager_Alternate) {
 
   SplitterConcurrencySetup setup{
       .num_threads = internal_config.num_threads,
-      .split_finder_processor =
-          absl::make_unique<SplitterFinderStreamProcessor>(
-              "SplitFinder", internal_config.num_threads,
-              FakeFindBestConditionConcurrentConsumerAlternate)};
+      .split_finder_processor = std::make_unique<SplitterFinderStreamProcessor>(
+          "SplitFinder", internal_config.num_threads,
+          FakeFindBestConditionConcurrentConsumerAlternate)};
   setup.split_finder_processor->StartWorkers();
 
   // Test case: Features alternate between valid and invalid.
@@ -2252,10 +2244,9 @@ TEST(DecisionTree, FindBestConditionConcurrentManagerScaled) {
   SplitterConcurrencySetup setup{
       .concurrent_execution = true,
       .num_threads = internal_config.num_threads,
-      .split_finder_processor =
-          absl::make_unique<SplitterFinderStreamProcessor>(
-              "SplitFinder", internal_config.num_threads,
-              FakeFindBestConditionConcurrentConsumerAlternate)};
+      .split_finder_processor = std::make_unique<SplitterFinderStreamProcessor>(
+          "SplitFinder", internal_config.num_threads,
+          FakeFindBestConditionConcurrentConsumerAlternate)};
   setup.split_finder_processor->StartWorkers();
 
   // Test case: Features alternate between valid and invalid, and processed in
@@ -2269,7 +2260,6 @@ TEST(DecisionTree, FindBestConditionConcurrentManagerScaled) {
 
   EXPECT_EQ(cache.splitter_cache_list.size(), 10);
   EXPECT_EQ(cache.durable_response_list.size(), 100);
-  EXPECT_EQ(cache.condition_list.size(), 20);
   EXPECT_FALSE(result);
 
   random.seed(4321);

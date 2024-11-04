@@ -16,6 +16,8 @@
 #include "yggdrasil_decision_forests/dataset/avro.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -23,14 +25,12 @@
 #include <utility>
 #include <vector>
 
-#include "absl/memory/memory.h"
+#include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "nlohmann/json.hpp"
-#include "nlohmann/json_fwd.hpp"
 #include "yggdrasil_decision_forests/utils/bytestream.h"
 #include "yggdrasil_decision_forests/utils/filesystem.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
@@ -73,9 +73,93 @@ absl::StatusOr<const std::string> GetJsonStringField(
   }
   if (!it->is_string()) {
     return absl::InvalidArgumentError(
-        absl::StrCat("Field \"", name, "\" is not a string"));
+        absl::StrCat("Field \"", name, "\" is not a string: ", it->dump()));
   }
   return it->get<std::string>();
+}
+
+// Extracts the "something" in a ["null", <something>].
+absl::StatusOr<const nlohmann::json*> ExtractTypeInArrayNullType(
+    const nlohmann::json& src) {
+  if (src.size() == 2 && src[0].is_string() &&
+      src[0].get<std::string>() == std::string("null")) {
+    return &src[1];
+  }
+  return absl::InvalidArgumentError(absl::StrCat(
+      "Expected Avro schema with [\"null\", <something>]. Instead got: ",
+      src.dump()));
+}
+
+// Extracts the "something" in a {"type": "array", "items": <something>}.
+absl::StatusOr<const nlohmann::json*> ExtractItemsInTypeArrayObject(
+    const nlohmann::json& src) {
+  if (src["type"].is_string() && src["type"].get<std::string>() == "array") {
+    return &src["items"];
+  }
+  return absl::InvalidArgumentError(
+      absl::StrCat("Expected Avro schema with {\"type\": \"array\", \"items\": "
+                   "<something>}. Instead got: ",
+                   src.dump()));
+}
+
+struct RecursiveAvroField {
+  RecursiveAvroField(AvroType type = AvroType::kUnknown,
+                     std::unique_ptr<RecursiveAvroField> sub_type = {},
+                     bool optional = false)
+      : type(type), sub_type(std::move(sub_type)), optional(optional) {}
+
+  AvroType type;
+  std::unique_ptr<RecursiveAvroField> sub_type;  // Only used if type==kArray.
+  bool optional;
+};
+
+absl::StatusOr<std::unique_ptr<RecursiveAvroField>> ParseRecursiveAvroField(
+    const nlohmann::json& json_type) {
+  if (json_type.is_string()) {
+    // type: "<scalar>"
+    ASSIGN_OR_RETURN(const auto type, ParseType(json_type.get<std::string>()));
+    return std::make_unique<RecursiveAvroField>(type);
+  } else if (json_type.is_object()) {
+    // type: {"type": "array", "items": <scalar>}
+    // TODO: Add support for {"type": "array", "items": <something>}
+    ASSIGN_OR_RETURN(const auto json_items,
+                     ExtractItemsInTypeArrayObject(json_type));
+    ASSIGN_OR_RETURN(auto sub_type, ParseRecursiveAvroField(*json_items));
+    return std::make_unique<RecursiveAvroField>(AvroType::kArray,
+                                                std::move(sub_type));
+  } else if (json_type.is_array()) {
+    // type: ["null", <something>]
+    ASSIGN_OR_RETURN(const auto json_sub_type,
+                     ExtractTypeInArrayNullType(json_type));
+    ASSIGN_OR_RETURN(auto sub_type, ParseRecursiveAvroField(*json_sub_type));
+    if (sub_type->optional) {
+      return absl::InvalidArgumentError(
+          "Avro schema contains two optional tags on the same field.");
+    }
+    sub_type->optional = true;
+    return sub_type;
+  }
+  return absl::InvalidArgumentError("Unsupported Avro schema");
+}
+
+absl::StatusOr<AvroField> RecursiveAvroFieldToAvroField(
+    const RecursiveAvroField& src) {
+  AvroField dst{.type = src.type, .optional = src.optional};
+
+  if (src.type == AvroType::kArray) {
+    dst.sub_type = src.sub_type->type;
+    dst.sub_optional = src.sub_type->optional;
+    if (dst.sub_type == AvroType::kArray) {
+      dst.sub_sub_type = src.sub_type->sub_type->type;
+      dst.sub_sub_optional = src.sub_type->sub_type->optional;
+      if (dst.sub_sub_type == AvroType::kArray) {
+        return absl::InvalidArgumentError(
+            "Unsupported Avro schema with more than 3 non-optional levels");
+      }
+    }
+  }
+
+  return dst;
 }
 
 }  // namespace
@@ -132,7 +216,10 @@ std::ostream& operator<<(std::ostream& os, const AvroField& field) {
   os << "AvroField(name=\"" << field.name
      << "\", type=" << TypeToString(field.type)
      << ", sub_type=" << TypeToString(field.sub_type)
-     << ", optional=" << field.optional << ")";
+     << ", sub_sub_type=" << TypeToString(field.sub_sub_type)
+     << ", optional=" << field.optional
+     << ", sub_optional=" << field.sub_optional
+     << ", sub_sub_optional=" << field.sub_sub_optional << ")";
   return os;
 }
 
@@ -146,7 +233,8 @@ absl::StatusOr<std::unique_ptr<AvroReader>> AvroReader::Create(
   ASSIGN_OR_RETURN(std::unique_ptr<utils::InputByteStream> file_handle,
                    file::OpenInputFile(path));
   auto reader = absl::WrapUnique(new AvroReader(std::move(file_handle)));
-  ASSIGN_OR_RETURN(const auto schema, reader->ReadHeader());
+  ASSIGN_OR_RETURN(reader->schema_string_, reader->ReadHeader(),
+                   _ << "While reading header of " << path);
   return std::move(reader);
 }
 
@@ -230,68 +318,19 @@ absl::StatusOr<std::string> AvroReader::ReadHeader() {
   for (const auto& json_field : json_fields->items()) {
     ASSIGN_OR_RETURN(const auto json_name,
                      GetJsonStringField(json_field.value(), "name"));
-    ASSIGN_OR_RETURN(const auto* json_sub_type,
+    ASSIGN_OR_RETURN(const auto* json_type,
                      GetJsonField(json_field.value(), "type"));
-    AvroType type = AvroType::kUnknown;
-    AvroType sub_type = AvroType::kUnknown;
-    bool optional = false;
 
-    if (json_sub_type->is_string()) {
-      const std::string str_type = json_sub_type->get<std::string>();
-      // Scalar
-      ASSIGN_OR_RETURN(type, ParseType(str_type));
-    } else if (json_sub_type->is_array()) {
-      // Optional
-      optional = true;
-
-      // const auto& json_sub_type_array = json_sub_type->GetArray();
-      if (json_sub_type->size() == 2 && (*json_sub_type)[0].is_string() &&
-          (*json_sub_type)[0].get<std::string>() == std::string("null")) {
-        if ((*json_sub_type)[1].is_string()) {
-          // Scalar
-          ASSIGN_OR_RETURN(type,
-                           ParseType((*json_sub_type)[1].get<std::string>()));
-        }
-        if ((*json_sub_type)[1].is_object()) {
-          // Array
-          ASSIGN_OR_RETURN(const auto json_sub_sub_type,
-                           GetJsonStringField((*json_sub_type)[1], "type"));
-          ASSIGN_OR_RETURN(const auto json_items,
-                           GetJsonStringField((*json_sub_type)[1], "items"));
-          if (json_sub_sub_type == "array") {
-            ASSIGN_OR_RETURN(sub_type, ParseType(json_items));
-            type = AvroType::kArray;
-          }
-        }
-      }
-    } else if (json_sub_type->is_object()) {
-      // Array
-      ASSIGN_OR_RETURN(const auto json_sub_sub_type,
-                       GetJsonStringField(*json_sub_type, "type"));
-      ASSIGN_OR_RETURN(const auto json_items,
-                       GetJsonStringField(*json_sub_type, "items"));
-
-      if (json_sub_sub_type == "array") {
-        ASSIGN_OR_RETURN(sub_type, ParseType(json_items));
-        type = AvroType::kArray;
-      }
-    }
-
-    if (type == AvroType::kUnknown) {
-      return absl::InvalidArgumentError(absl::StrCat(
-          "Unsupported type=", json_sub_type->get<std::string>(),
-          " for field \"", json_name,
-          "\". YDF only supports the following types: null, "
-          "boolean, long, int, float, double, string, bytes, array of <scalar "
-          "type>, [null, <scalar type>], [null, array[<scalar type>]]."));
-    }
-
-    fields_.push_back(AvroField{
-        .name = json_name,
-        .type = type,
-        .sub_type = sub_type,
-        .optional = optional,
-    });
+    ASSIGN_OR_RETURN(const auto recursive_field,
+                     ParseRecursiveAvroField(*json_type),
+                     _ << "Unsupported Avro schema for field " << json_name
+                       << ":" << json_type->dump());
+    ASSIGN_OR_RETURN(auto field,
+                     RecursiveAvroFieldToAvroField(*recursive_field),
+                     _ << "Unsupported Avro schema for field " << json_name
+                       << ":" << json_type->dump());
+    field.name = json_name;
+    fields_.push_back(field);
   }
 
   return schema;
@@ -352,26 +391,26 @@ absl::StatusOr<bool> AvroReader::ReadNextRecord() {
   return true;
 }
 
-absl::StatusOr<absl::optional<bool>> AvroReader::ReadNextFieldBoolean(
+absl::StatusOr<std::optional<bool>> AvroReader::ReadNextFieldBoolean(
     const AvroField& field) {
   MAYBE_SKIP_OPTIONAL(field);
   ASSIGN_OR_RETURN(const auto value, current_block_reader_->ReadByte());
   return value;
 }
 
-absl::StatusOr<absl::optional<int64_t>> AvroReader::ReadNextFieldInteger(
+absl::StatusOr<std::optional<int64_t>> AvroReader::ReadNextFieldInteger(
     const AvroField& field) {
   MAYBE_SKIP_OPTIONAL(field);
   return internal::ReadInteger(&current_block_reader_.value());
 }
 
-absl::StatusOr<absl::optional<float>> AvroReader::ReadNextFieldFloat(
+absl::StatusOr<std::optional<float>> AvroReader::ReadNextFieldFloat(
     const AvroField& field) {
   MAYBE_SKIP_OPTIONAL(field);
   return internal::ReadFloat(&current_block_reader_.value());
 }
 
-absl::StatusOr<absl::optional<double>> AvroReader::ReadNextFieldDouble(
+absl::StatusOr<std::optional<double>> AvroReader::ReadNextFieldDouble(
     const AvroField& field) {
   MAYBE_SKIP_OPTIONAL(field);
   return internal::ReadDouble(&current_block_reader_.value());
@@ -379,29 +418,37 @@ absl::StatusOr<absl::optional<double>> AvroReader::ReadNextFieldDouble(
 
 absl::StatusOr<bool> AvroReader::ReadNextFieldString(const AvroField& field,
                                                      std::string* value) {
+  STATUS_CHECK(field.type == AvroType::kString ||
+               field.type == AvroType::kBytes);
   if (field.optional) {
     ASSIGN_OR_RETURN(const auto has_value, current_block_reader_->ReadByte());
     if (!has_value) {
       return false;
     }
+    STATUS_CHECK_EQ(has_value, 2);
   }
   RETURN_IF_ERROR(internal::ReadString(&current_block_reader_.value(), value));
   return true;
 }
 
-absl::StatusOr<bool> AvroReader::ReadNextFieldArrayFloat(
-    const AvroField& field, std::vector<float>* values) {
+template <typename T, typename R>
+absl::StatusOr<bool> AvroReader::ReadNextFieldArrayFloatingPointTemplate(
+    const AvroField& field, std::vector<T>* values) {
+  STATUS_CHECK(field.type == AvroType::kArray);
+  STATUS_CHECK(field.sub_type == AvroType::kFloat ||
+               field.sub_type == AvroType::kDouble);
+
   values->clear();
   if (field.optional) {
     ASSIGN_OR_RETURN(const auto has_value, current_block_reader_->ReadByte());
     if (!has_value) {
       return false;
     }
+    STATUS_CHECK_EQ(has_value, 2);
   }
   while (true) {
     ASSIGN_OR_RETURN(auto num_values,
                      internal::ReadInteger(&current_block_reader_.value()));
-    values->reserve(values->size() + num_values);
     if (num_values == 0) {
       break;
     }
@@ -411,57 +458,58 @@ absl::StatusOr<bool> AvroReader::ReadNextFieldArrayFloat(
       (void)block_size;
       num_values = -num_values;
     }
+    STATUS_CHECK_GE(num_values, 0);
+    values->reserve(values->size() + num_values);
     for (size_t value_idx = 0; value_idx < num_values; value_idx++) {
-      ASSIGN_OR_RETURN(auto value,
-                       internal::ReadFloat(&current_block_reader_.value()));
+      if (field.sub_optional) {
+        ASSIGN_OR_RETURN(const auto has_sub_value,
+                         current_block_reader_->ReadByte());
+        if (!has_sub_value) {
+          values->push_back(std::numeric_limits<T>::quiet_NaN());
+          continue;
+        }
+        STATUS_CHECK_EQ(has_sub_value, 2);
+      }
+      ASSIGN_OR_RETURN(R value, internal::ReadFloatingPointTemplate<R>(
+                                    &current_block_reader_.value()));
       values->push_back(value);
     }
   }
-
   return true;
+}
+
+absl::StatusOr<bool> AvroReader::ReadNextFieldArrayFloat(
+    const AvroField& field, std::vector<float>* values) {
+  STATUS_CHECK(field.sub_type == AvroType::kFloat);
+  return ReadNextFieldArrayFloatingPointTemplate<float>(field, values);
 }
 
 absl::StatusOr<bool> AvroReader::ReadNextFieldArrayDouble(
     const AvroField& field, std::vector<double>* values) {
-  values->clear();
-  if (field.optional) {
-    ASSIGN_OR_RETURN(const auto has_value, current_block_reader_->ReadByte());
-    if (!has_value) {
-      return false;
-    }
-  }
-  while (true) {
-    ASSIGN_OR_RETURN(auto num_values,
-                     internal::ReadInteger(&current_block_reader_.value()));
-    values->reserve(values->size() + num_values);
-    if (num_values == 0) {
-      break;
-    }
-    if (num_values < 0) {
-      ASSIGN_OR_RETURN(auto block_size,
-                       internal::ReadInteger(&current_block_reader_.value()));
-      (void)block_size;
-      num_values = -num_values;
-    }
-    for (size_t value_idx = 0; value_idx < num_values; value_idx++) {
-      ASSIGN_OR_RETURN(auto value,
-                       internal::ReadDouble(&current_block_reader_.value()));
-      values->push_back(value);
-    }
-  }
-
-  return true;
+  STATUS_CHECK(field.sub_type == AvroType::kDouble);
+  return ReadNextFieldArrayFloatingPointTemplate<double>(field, values);
 }
 
 absl::StatusOr<bool> AvroReader::ReadNextFieldArrayDoubleIntoFloat(
     const AvroField& field, std::vector<float>* values) {
-  values->clear();
+  STATUS_CHECK(field.sub_type == AvroType::kDouble);
+  return ReadNextFieldArrayFloatingPointTemplate<float, double>(field, values);
+}
+
+absl::StatusOr<bool> AvroReader::ReadNextFieldArrayString(
+    const AvroField& field, std::vector<std::string>* values) {
+  STATUS_CHECK(field.type == AvroType::kArray);
+  STATUS_CHECK(field.sub_type == AvroType::kString ||
+               field.sub_type == AvroType::kBytes);
+
   if (field.optional) {
     ASSIGN_OR_RETURN(const auto has_value, current_block_reader_->ReadByte());
     if (!has_value) {
       return false;
     }
+    STATUS_CHECK_EQ(has_value, 2);
   }
+
   while (true) {
     ASSIGN_OR_RETURN(auto num_values,
                      internal::ReadInteger(&current_block_reader_.value()));
@@ -476,22 +524,52 @@ absl::StatusOr<bool> AvroReader::ReadNextFieldArrayDoubleIntoFloat(
       num_values = -num_values;
     }
     for (size_t value_idx = 0; value_idx < num_values; value_idx++) {
-      ASSIGN_OR_RETURN(auto value,
-                       internal::ReadDouble(&current_block_reader_.value()));
-      values->push_back(value);
+      if (field.sub_optional) {
+        ASSIGN_OR_RETURN(const auto has_sub_value,
+                         current_block_reader_->ReadByte());
+        if (!has_sub_value) {
+          values->push_back("");
+          continue;
+        }
+      }
+      std::string sub_value;
+      RETURN_IF_ERROR(
+          internal::ReadString(&current_block_reader_.value(), &sub_value));
+      values->push_back(std::move(sub_value));
     }
   }
 
   return true;
 }
 
-absl::StatusOr<bool> AvroReader::ReadNextFieldArrayString(
-    const AvroField& field, std::vector<std::string>* values) {
+absl::StatusOr<bool> AvroReader::ReadNextFieldArrayArrayFloat(
+    const AvroField& field, std::vector<std::vector<float>>* values) {
+  STATUS_CHECK(field.sub_sub_type == AvroType::kFloat);
+  return ReadNextFieldArrayArrayFloatingPointTemplate<float>(field, values);
+}
+
+absl::StatusOr<bool> AvroReader::ReadNextFieldArrayArrayDoubleIntoFloat(
+    const AvroField& field, std::vector<std::vector<float>>* values) {
+  STATUS_CHECK(field.sub_sub_type == AvroType::kDouble);
+  return ReadNextFieldArrayArrayFloatingPointTemplate<float, double>(field,
+                                                                     values);
+}
+
+template <typename T, typename R>
+absl::StatusOr<bool> AvroReader::ReadNextFieldArrayArrayFloatingPointTemplate(
+    const AvroField& field, std::vector<std::vector<T>>* values) {
+  STATUS_CHECK(field.type == AvroType::kArray);
+  STATUS_CHECK(field.sub_type == AvroType::kArray);
+  STATUS_CHECK(field.sub_sub_type == AvroType::kFloat ||
+               field.sub_sub_type == AvroType::kDouble);
+
+  values->clear();
   if (field.optional) {
     ASSIGN_OR_RETURN(const auto has_value, current_block_reader_->ReadByte());
     if (!has_value) {
       return false;
     }
+    STATUS_CHECK_EQ(has_value, 2);
   }
 
   while (true) {
@@ -500,18 +578,25 @@ absl::StatusOr<bool> AvroReader::ReadNextFieldArrayString(
     if (num_values == 0) {
       break;
     }
-    values->reserve(values->size() + num_values);
     if (num_values < 0) {
       ASSIGN_OR_RETURN(auto block_size,
                        internal::ReadInteger(&current_block_reader_.value()));
       (void)block_size;
       num_values = -num_values;
     }
+    STATUS_CHECK_GE(num_values, 0);
+    values->reserve(values->size() + num_values);
     for (size_t value_idx = 0; value_idx < num_values; value_idx++) {
-      std::string sub_value;
-      RETURN_IF_ERROR(
-          internal::ReadString(&current_block_reader_.value(), &sub_value));
-      values->push_back(std::move(sub_value));
+      values->emplace_back();
+      // Note: Missing values are replaced with an empty list.
+      RETURN_IF_ERROR((ReadNextFieldArrayFloatingPointTemplate<T, R>(
+                           AvroField{.name = field.name,
+                                     .type = field.sub_type,
+                                     .optional = field.sub_optional,
+                                     .sub_type = field.sub_sub_type,
+                                     .sub_optional = field.sub_sub_optional},
+                           &values->back())
+                           .status()));
     }
   }
 
@@ -553,6 +638,15 @@ absl::Status ReadString(utils::InputByteStream* stream, std::string* value) {
     }
   }
   return absl::OkStatus();
+}
+
+template <typename T>
+absl::StatusOr<T> ReadFloatingPointTemplate(utils::InputByteStream* stream) {
+  if (std::is_same_v<T, float>) {
+    return ReadFloat(stream);
+  } else if (std::is_same_v<T, double>) {
+    return ReadDouble(stream);
+  }
 }
 
 absl::StatusOr<double> ReadDouble(utils::InputByteStream* stream) {

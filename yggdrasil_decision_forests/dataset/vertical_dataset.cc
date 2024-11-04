@@ -20,19 +20,18 @@
 #include <cstdint>
 #include <memory>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "absl/base/optimization.h"
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/example.pb.h"
@@ -56,51 +55,60 @@ constexpr char kNaSymbol[] = "NA";  // NA=non-available i.e. missing value.
 constexpr char kEmptySymbol[] = "EMPTY";
 
 absl::StatusOr<std::unique_ptr<VerticalDataset::AbstractColumn>> CreateColumn(
-    const proto::ColumnType type, const absl::string_view column_name) {
+    const proto::Column col_spec) {
   std::unique_ptr<VerticalDataset::AbstractColumn> col;
-  switch (type) {
+  switch (col_spec.type()) {
     case proto::ColumnType::UNKNOWN:
       return absl::InvalidArgumentError(
-          absl::StrCat("Impossible to create a column \"", column_name,
+          absl::StrCat("Impossible to create a column \"", col_spec.name(),
                        "\" of type UNKNOWN. If you "
                        "created the dataspec manually, make sure the \"type\" "
                        "fields are set for all the columns."));
     case proto::ColumnType::NUMERICAL:
-      col = absl::make_unique<VerticalDataset::NumericalColumn>();
+      col = std::make_unique<VerticalDataset::NumericalColumn>();
       break;
     case proto::ColumnType::NUMERICAL_SET:
-      col = absl::make_unique<VerticalDataset::NumericalSetColumn>();
+      col = std::make_unique<VerticalDataset::NumericalSetColumn>();
       break;
     case proto::ColumnType::NUMERICAL_LIST:
-      col = absl::make_unique<VerticalDataset::NumericalListColumn>();
+      col = std::make_unique<VerticalDataset::NumericalListColumn>();
       break;
     case proto::ColumnType::CATEGORICAL:
-      col = absl::make_unique<VerticalDataset::CategoricalColumn>();
+      col = std::make_unique<VerticalDataset::CategoricalColumn>();
       break;
     case proto::ColumnType::CATEGORICAL_SET:
-      col = absl::make_unique<VerticalDataset::CategoricalSetColumn>();
+      col = std::make_unique<VerticalDataset::CategoricalSetColumn>();
       break;
     case proto::ColumnType::CATEGORICAL_LIST:
-      col = absl::make_unique<VerticalDataset::CategoricalListColumn>();
+      col = std::make_unique<VerticalDataset::CategoricalListColumn>();
       break;
     case proto::ColumnType::BOOLEAN:
-      col = absl::make_unique<VerticalDataset::BooleanColumn>();
+      col = std::make_unique<VerticalDataset::BooleanColumn>();
       break;
     case proto::ColumnType::STRING:
-      col = absl::make_unique<VerticalDataset::StringColumn>();
+      col = std::make_unique<VerticalDataset::StringColumn>();
       break;
     case proto::ColumnType::DISCRETIZED_NUMERICAL:
-      col = absl::make_unique<VerticalDataset::DiscretizedNumericalColumn>();
+      col = std::make_unique<VerticalDataset::DiscretizedNumericalColumn>();
       break;
     case proto::ColumnType::HASH:
-      col = absl::make_unique<VerticalDataset::HashColumn>();
+      col = std::make_unique<VerticalDataset::HashColumn>();
       break;
+    case proto::ColumnType::NUMERICAL_VECTOR_SEQUENCE: {
+      const int l = col_spec.numerical_vector_sequence().vector_length();
+      if (l <= 0) {
+        return absl::InvalidArgumentError(
+            absl::StrCat("The vector length of the column \"", col_spec.name(),
+                         "\" is not strictly positive (", l, ")"));
+      }
+      col = std::make_unique<VerticalDataset::NumericalVectorSequenceColumn>(l);
+    } break;
     default:
       return absl::InvalidArgumentError(absl::StrCat(
-          "Column type ", proto::ColumnType_Name(type),
-          " provided for column \"", column_name, "\" not implemented"));
+          "Column type ", proto::ColumnType_Name(col_spec.type()),
+          " provided for column \"", col_spec.name(), "\" not implemented"));
   }
-  col->set_name(column_name);
+  col->set_name(col_spec.name());
   return std::move(col);
 }
 
@@ -134,14 +142,14 @@ int VerticalDataset::ColumnNameToColumnIdx(absl::string_view name) const {
 
 void VerticalDataset::AppendExample(
     const proto::Example& example,
-    const absl::optional<std::vector<int>>& load_columns) {
+    const std::optional<std::vector<int>>& load_columns) {
   // TODO: Update.
   CHECK_OK(AppendExampleWithStatus(example, load_columns));
 }
 
 absl::Status VerticalDataset::AppendExampleWithStatus(
     const proto::Example& example,
-    const absl::optional<std::vector<int>>& load_columns) {
+    const std::optional<std::vector<int>>& load_columns) {
   DCHECK_EQ(columns_.size(), example.attributes_size());
   if (load_columns.has_value()) {
     for (int col_idx : load_columns.value()) {
@@ -201,8 +209,7 @@ absl::StatusOr<VerticalDataset::AbstractColumn*> VerticalDataset::AddColumn(
     return absl::InvalidArgumentError("The column already exists");
   }
   *data_spec_.add_columns() = column_spec;
-  ASSIGN_OR_RETURN(auto new_column,
-                   CreateColumn(column_spec.type(), column_spec.name()));
+  ASSIGN_OR_RETURN(auto new_column, CreateColumn(column_spec));
   PushBackOwnedColumn(std::move(new_column));
   auto* column = mutable_column(columns_.size() - 1);
   column->Resize(nrow_);
@@ -218,8 +225,7 @@ absl::StatusOr<proto::Column*> VerticalDataset::AddColumn(
   auto* column_spec = data_spec_.add_columns();
   column_spec->set_name(std::string(name));
   column_spec->set_type(type);
-  ASSIGN_OR_RETURN(auto new_column,
-                   CreateColumn(column_spec->type(), column_spec->name()));
+  ASSIGN_OR_RETURN(auto new_column, CreateColumn(*column_spec));
   PushBackOwnedColumn(std::move(new_column));
   auto* column = mutable_column(columns_.size() - 1);
   column->Resize(nrow_);
@@ -232,8 +238,7 @@ absl::StatusOr<VerticalDataset::AbstractColumn*> VerticalDataset::ReplaceColumn(
   DCHECK_GE(column_idx, 0);
   DCHECK_LT(column_idx, columns_.size());
   *data_spec_.mutable_columns(column_idx) = column_spec;
-  ASSIGN_OR_RETURN(auto new_column,
-                   CreateColumn(column_spec.type(), column_spec.name()));
+  ASSIGN_OR_RETURN(auto new_column, CreateColumn(column_spec));
   auto* raw_pointer = new_column.get();
   columns_[column_idx] = ColumnContainer{raw_pointer, std::move(new_column)};
   raw_pointer->Resize(nrow_);
@@ -245,8 +250,7 @@ absl::Status VerticalDataset::CreateColumnsFromDataspec() {
   columns_.reserve(data_spec_.columns_size());
   for (int col_idx = 0; col_idx < data_spec_.columns_size(); col_idx++) {
     const auto& col_spec = data_spec_.columns(col_idx);
-    ASSIGN_OR_RETURN(auto new_column,
-                     CreateColumn(col_spec.type(), col_spec.name()));
+    ASSIGN_OR_RETURN(auto new_column, CreateColumn(col_spec));
     PushBackOwnedColumn(std::move(new_column));
     columns_.back().owned_column->set_name(col_spec.name());
     DCHECK_EQ(columns_.back().column->type(), col_spec.type());
@@ -958,7 +962,7 @@ std::string VerticalDataset::ValueToString(const row_t row,
 }
 
 std::string VerticalDataset::DebugString(
-    const absl::optional<row_t> max_displayed_rows, const bool vertical,
+    const std::optional<row_t> max_displayed_rows, const bool vertical,
     const int digit_precision) const {
   // Maximum number of rows to display.
   row_t num_displayed_rows = nrow();
@@ -1014,8 +1018,7 @@ void VerticalDataset::Set(const row_t row, const int col,
 }
 
 void VerticalDataset::Reserve(
-    const row_t num_rows,
-    const absl::optional<std::vector<int>>& load_columns) {
+    const row_t num_rows, const std::optional<std::vector<int>>& load_columns) {
   if (load_columns.has_value()) {
     for (int col_idx : load_columns.value()) {
       mutable_column(col_idx)->Reserve(num_rows);

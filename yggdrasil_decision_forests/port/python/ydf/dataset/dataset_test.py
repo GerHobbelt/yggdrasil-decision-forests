@@ -12,7 +12,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import enum
 import os
+from typing import Optional
 import unittest
 
 from absl.testing import absltest
@@ -51,7 +53,31 @@ class GenericDatasetTest(parameterized.TestCase):
       (np.array(["a", np.nan], np.object_), Semantic.CATEGORICAL),
   )
   def test_infer_semantic(self, value, expected_semantic):
-    self.assertEqual(dataset.infer_semantic("", value), expected_semantic)
+    self.assertEqual(
+        dataset.infer_semantic("", value, discretize_numerical=False),
+        expected_semantic,
+    )
+
+  @parameterized.parameters(
+      (np.array([1], np.int8), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.int16), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.int32), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.int64), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.uint8), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.uint16), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.uint32), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.uint64), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.float32), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.float64), Semantic.DISCRETIZED_NUMERICAL),
+      (np.array([1], np.bool_), Semantic.BOOLEAN),
+      (np.array(["a"], np.bytes_), Semantic.CATEGORICAL),
+      (np.array(["a", np.nan], np.object_), Semantic.CATEGORICAL),
+  )
+  def test_infer_semantic_discretized(self, value, expected_semantic):
+    self.assertEqual(
+        dataset.infer_semantic("", value, discretize_numerical=True),
+        expected_semantic,
+    )
 
   @parameterized.parameters(
       np.float16,
@@ -773,7 +799,7 @@ B,3""")
 
   @unittest.skip("Requires building YDF with tensorflow io")
   def test_read_from_sharded_tfe(self):
-    sharded_path = "tfrecord+tfe:" + os.path.join(
+    sharded_path = "tfrecord:" + os.path.join(
         test_utils.ydf_test_data_path(), "dataset", "toy.tfe-tfrecord@2"
     )
     ds = dataset.create_vertical_dataset(
@@ -1495,6 +1521,45 @@ feature.0_of_3,feature.1_of_3,feature.2_of_3
         ValueError, "The pandas DataFrame must have string column names"
     ):
       dataset.create_vertical_dataset(pd.DataFrame([[1, 2, 3], [4, 5, 6]]))
+
+  def test_boolean_column(self):
+    data = {
+        "f1": np.array([True, True, True, False, False, False, False]),
+    }
+    ds = dataset.create_vertical_dataset(
+        data,
+        columns=[("f1", dataspec.Semantic.BOOLEAN)],
+    )
+    self.assertEqual(
+        ds.data_spec(),
+        ds_pb.DataSpecification(
+            created_num_rows=7,
+            columns=[
+                ds_pb.Column(
+                    name="f1",
+                    type=ds_pb.ColumnType.BOOLEAN,
+                    count_nas=0,
+                    boolean=ds_pb.BooleanSpec(count_true=3, count_false=4),
+                    dtype=ds_pb.DType.DTYPE_BOOL,
+                )
+            ],
+        ),
+    )
+    self.assertEqual(ds._dataset.DebugString(), "f1\n1\n1\n1\n0\n0\n0\n0\n")
+
+  def test_fail_gracefully_for_incorrect_boolean_type(self):
+    data = {
+        "f1": np.array([1, 1, 1, 1, 1, 0, 0, 0, 0, 0]),
+    }
+    with self.assertRaisesRegex(
+        test_utils.AbslInvalidArgumentError,
+        "Cannot import column 'f1' with semantic=Semantic.BOOLEAN as it does"
+        " not contain boolean values.*",
+    ):
+      dataset.create_vertical_dataset(
+          data,
+          columns=[("f1", dataspec.Semantic.BOOLEAN)],
+      )
 
 
 class CategoricalSetTest(absltest.TestCase):
@@ -2329,6 +2394,430 @@ class DenseDictionaryTest(parameterized.TestCase):
   )
   def test_dense_integer_dictionary_size_is_none(self, values):
     self.assertIsNone(dataset.dense_integer_dictionary_size(np.array(values)))
+
+
+class DiscretizedNumericalTest(parameterized.TestCase):
+
+  class DataFormat(enum.Enum):
+    CSV = "csv"
+    IN_MEMORY = "in_memory"
+
+  def create_inmemory_dataset(self):
+    return {
+        "f1": np.array([100 + i for i in range(1, 11)]),
+        "f2": np.array([100 + 2 * i for i in range(10, 0, -1)]),
+    }
+
+  def create_csv(self) -> str:
+    tmp_dir = self.create_tempdir()
+    ds = self.create_inmemory_dataset()
+    csv_file = self.create_tempfile(
+        content=pd.DataFrame(ds).to_csv(index=False),
+        file_path=os.path.join(tmp_dir.full_path, "file.csv"),
+    )
+    return csv_file.full_path
+
+  def create_data(self, data_format: DataFormat):
+    if data_format == DiscretizedNumericalTest.DataFormat.CSV:
+      return self.create_csv()
+    elif data_format == DiscretizedNumericalTest.DataFormat.IN_MEMORY:
+      return self.create_inmemory_dataset()
+    else:
+      raise ValueError(f"Unknown data format ${data_format}")
+
+  def get_spec_options(
+      self, data_format: DataFormat, is_manual_type: Optional[bool]
+  ):
+    if data_format == self.DataFormat.CSV:
+      dtype = None  # Never set for CSV data.
+      count_nas = None  # Never set for CSV data.
+      if is_manual_type is None:
+        is_manual_type = False  # Always set for CSV data.
+    elif data_format == self.DataFormat.IN_MEMORY:
+      dtype = ds_pb.DType.DTYPE_INT64  # Always set for in-memory data.
+      count_nas = 0  # Always set for in-memory data.
+      is_manual_type = None  # Never set for in-memory data.
+    else:
+      raise ValueError("Not reached")
+    return dtype, count_nas, is_manual_type
+
+  def col_spec_f1_discretized(
+      self, data_format: DataFormat, is_manual_type: Optional[bool] = None
+  ):
+    dtype, count_nas, is_manual_type = self.get_spec_options(
+        data_format, is_manual_type
+    )
+    col_spec = ds_pb.Column(
+        name="f1",
+        type=ds_pb.ColumnType.DISCRETIZED_NUMERICAL,
+        is_manual_type=is_manual_type,
+        numerical=ds_pb.NumericalSpec(
+            mean=105.5,
+            min_value=101.0,
+            max_value=110.0,
+            standard_deviation=2.8722813232690143,
+        ),
+        discretized_numerical=ds_pb.DiscretizedNumericalSpec(
+            boundaries=[
+                1.401298464324817e-45,
+                103.5,
+                105.49999237060547,
+                105.50000762939453,
+                106.5,
+                109.5,
+            ],
+            original_num_unique_values=10,
+            maximum_num_bins=255,
+            min_obs_in_bins=3,
+        ),
+        dtype=dtype,
+        count_nas=count_nas,
+    )
+    return col_spec
+
+  def col_spec_f2_discretized(
+      self, data_format: DataFormat, is_manual_type: Optional[bool] = None
+  ):
+    dtype, count_nas, is_manual_type = self.get_spec_options(
+        data_format, is_manual_type
+    )
+    col_spec = ds_pb.Column(
+        name="f2",
+        type=ds_pb.ColumnType.DISCRETIZED_NUMERICAL,
+        is_manual_type=is_manual_type,
+        numerical=ds_pb.NumericalSpec(
+            mean=111.0,
+            min_value=102.0,
+            max_value=120.0,
+            standard_deviation=5.744562646538029,
+        ),
+        discretized_numerical=ds_pb.DiscretizedNumericalSpec(
+            boundaries=[
+                1.401298464324817e-45,
+                107.0,
+                110.99999237060547,
+                111.00000762939453,
+                113.0,
+                119.0,
+            ],
+            original_num_unique_values=10,
+            maximum_num_bins=255,
+            min_obs_in_bins=3,
+        ),
+        dtype=dtype,
+        count_nas=count_nas,
+    )
+    return col_spec
+
+  def col_spec_f1_numerical(
+      self, data_format: DataFormat, is_manual_type: Optional[bool] = None
+  ):
+    dtype, count_nas, is_manual_type = self.get_spec_options(
+        data_format, is_manual_type
+    )
+    col_spec = ds_pb.Column(
+        name="f1",
+        type=ds_pb.ColumnType.NUMERICAL,
+        is_manual_type=is_manual_type,
+        numerical=ds_pb.NumericalSpec(
+            mean=105.5,
+            min_value=101.0,
+            max_value=110.0,
+            standard_deviation=2.8722813232690143,
+        ),
+        dtype=dtype,
+        count_nas=count_nas,
+    )
+    return col_spec
+
+  def col_spec_f2_numerical(
+      self, data_format: DataFormat, is_manual_type: Optional[bool] = None
+  ):
+    dtype, count_nas, is_manual_type = self.get_spec_options(
+        data_format, is_manual_type
+    )
+    col_spec = ds_pb.Column(
+        name="f2",
+        type=ds_pb.ColumnType.NUMERICAL,
+        is_manual_type=is_manual_type,
+        numerical=ds_pb.NumericalSpec(
+            mean=111.0,
+            min_value=102.0,
+            max_value=120.0,
+            standard_deviation=5.744562646538029,
+        ),
+        dtype=dtype,
+        count_nas=count_nas,
+    )
+    return col_spec
+
+  @parameterized.parameters(DataFormat.CSV, DataFormat.IN_MEMORY)
+  def test_contents_inferred_dataspec(self, data_format):
+    data = self.create_data(data_format)
+    ds = dataset.create_vertical_dataset(
+        data,
+        discretize_numerical_columns=True,
+    )
+    self.assertEqual(
+        ds._dataset.DebugString(),
+        """f1,f2
+51.75,120
+51.75,116
+51.75,116
+104.5,116
+104.5,112
+106,109
+108,109
+108,53.5
+108,53.5
+110.5,53.5
+""",
+    )
+
+  @parameterized.parameters(DataFormat.CSV, DataFormat.IN_MEMORY)
+  def test_contents_explicit_dataspec(self, data_format):
+    data = self.create_data(data_format)
+    data_spec = ds_pb.DataSpecification(
+        columns=[
+            self.col_spec_f1_discretized(data_format),
+            self.col_spec_f2_discretized(data_format),
+        ],
+        created_num_rows=10,
+    )
+    ds = dataset.create_vertical_dataset(data, data_spec=data_spec)
+    self.assertEqual(
+        ds._dataset.DebugString(),
+        """f1,f2
+51.75,120
+51.75,116
+51.75,116
+104.5,116
+104.5,112
+106,109
+108,109
+108,53.5
+108,53.5
+110.5,53.5
+""",
+    )
+
+  @parameterized.parameters(DataFormat.CSV, DataFormat.IN_MEMORY)
+  def test_global_parameter_only(self, data_format):
+    data = self.create_data(data_format)
+    ds = dataset.create_vertical_dataset(
+        data,
+        discretize_numerical_columns=True,
+    )
+    test_utils.assertProto2Equal(
+        self,
+        ds.data_spec(),
+        ds_pb.DataSpecification(
+            columns=[
+                self.col_spec_f1_discretized(data_format),
+                self.col_spec_f2_discretized(data_format),
+            ],
+            created_num_rows=10,
+        ),
+    )
+
+  @parameterized.parameters(DataFormat.CSV, DataFormat.IN_MEMORY)
+  def test_column_def(self, data_format):
+    data = self.create_data(data_format)
+    ds = dataset.create_vertical_dataset(
+        data,
+        columns=[("f1", Semantic.DISCRETIZED_NUMERICAL)],
+        include_all_columns=True,
+    )
+    test_utils.assertProto2Equal(
+        self,
+        ds.data_spec(),
+        ds_pb.DataSpecification(
+            columns=[
+                self.col_spec_f1_discretized(data_format, is_manual_type=True),
+                self.col_spec_f2_numerical(data_format),
+            ],
+            created_num_rows=10,
+        ),
+    )
+
+  @parameterized.parameters(DataFormat.CSV, DataFormat.IN_MEMORY)
+  def test_column_def_and_global(self, data_format):
+    data = self.create_data(data_format)
+    ds = dataset.create_vertical_dataset(
+        data,
+        columns=[("f1", Semantic.NUMERICAL)],
+        discretize_numerical_columns=True,
+        include_all_columns=True,
+    )
+    test_utils.assertProto2Equal(
+        self,
+        ds.data_spec(),
+        ds_pb.DataSpecification(
+            columns=[
+                self.col_spec_f1_numerical(data_format, is_manual_type=True),
+                self.col_spec_f2_discretized(data_format),
+            ],
+            created_num_rows=10,
+        ),
+    )
+
+  @parameterized.parameters(DataFormat.CSV, DataFormat.IN_MEMORY)
+  def test_num_bins_global(self, data_format):
+    data = self.create_data(data_format)
+    ds = dataset.create_vertical_dataset(
+        data,
+        discretize_numerical_columns=True,
+        num_discretized_numerical_bins=4,
+    )
+    dtype, count_nas, is_manual_type = self.get_spec_options(data_format, None)
+    test_utils.assertProto2Equal(
+        self,
+        ds.data_spec(),
+        ds_pb.DataSpecification(
+            columns=[
+                ds_pb.Column(
+                    name="f1",
+                    type=ds_pb.ColumnType.DISCRETIZED_NUMERICAL,
+                    is_manual_type=is_manual_type,
+                    numerical=ds_pb.NumericalSpec(
+                        mean=105.5,
+                        min_value=101.0,
+                        max_value=110.0,
+                        standard_deviation=2.8722813232690143,
+                    ),
+                    discretized_numerical=ds_pb.DiscretizedNumericalSpec(
+                        boundaries=[
+                            -1.401298464324817e-45,
+                            1.401298464324817e-45,
+                            105.49999237060547,
+                        ],
+                        original_num_unique_values=10,
+                        maximum_num_bins=4,
+                        min_obs_in_bins=3,
+                    ),
+                    count_nas=count_nas,
+                    dtype=dtype,
+                ),
+                ds_pb.Column(
+                    name="f2",
+                    type=ds_pb.ColumnType.DISCRETIZED_NUMERICAL,
+                    is_manual_type=is_manual_type,
+                    numerical=ds_pb.NumericalSpec(
+                        mean=111.0,
+                        min_value=102.0,
+                        max_value=120.0,
+                        standard_deviation=5.744562646538029,
+                    ),
+                    discretized_numerical=ds_pb.DiscretizedNumericalSpec(
+                        boundaries=[
+                            -1.401298464324817e-45,
+                            1.401298464324817e-45,
+                            110.99999237060547,
+                        ],
+                        original_num_unique_values=10,
+                        maximum_num_bins=4,
+                        min_obs_in_bins=3,
+                    ),
+                    count_nas=count_nas,
+                    dtype=dtype,
+                ),
+            ],
+            created_num_rows=10,
+        ),
+    )
+
+  @parameterized.parameters(DataFormat.CSV, DataFormat.IN_MEMORY)
+  def test_num_bins_feature_def(self, data_format):
+    data = self.create_data(data_format)
+    ds = dataset.create_vertical_dataset(
+        data,
+        columns=[
+            Column(
+                name="f1",
+                semantic=Semantic.DISCRETIZED_NUMERICAL,
+                num_discretized_numerical_bins=4,
+            )
+        ],
+    )
+    dtype, count_nas, is_manual_type = self.get_spec_options(data_format, True)
+    test_utils.assertProto2Equal(
+        self,
+        ds.data_spec(),
+        ds_pb.DataSpecification(
+            columns=[
+                ds_pb.Column(
+                    name="f1",
+                    type=ds_pb.ColumnType.DISCRETIZED_NUMERICAL,
+                    is_manual_type=is_manual_type,
+                    numerical=ds_pb.NumericalSpec(
+                        mean=105.5,
+                        min_value=101.0,
+                        max_value=110.0,
+                        standard_deviation=2.8722813232690143,
+                    ),
+                    discretized_numerical=ds_pb.DiscretizedNumericalSpec(
+                        boundaries=[
+                            -1.401298464324817e-45,
+                            1.401298464324817e-45,
+                            105.49999237060547,
+                        ],
+                        original_num_unique_values=10,
+                        maximum_num_bins=4,
+                        min_obs_in_bins=3,
+                    ),
+                    count_nas=count_nas,
+                    dtype=dtype,
+                ),
+            ],
+            created_num_rows=10,
+        ),
+    )
+
+  @parameterized.parameters(DataFormat.CSV, DataFormat.IN_MEMORY)
+  def test_respects_data_spec(self, data_format: DataFormat):
+    data_spec = ds_pb.DataSpecification(
+        columns=[
+            ds_pb.Column(
+                name="f1",
+                type=ds_pb.ColumnType.DISCRETIZED_NUMERICAL,
+                numerical=ds_pb.NumericalSpec(
+                    mean=105.5,
+                    min_value=101.0,
+                    max_value=110.0,
+                    standard_deviation=2.8722813232690143,
+                ),
+                discretized_numerical=ds_pb.DiscretizedNumericalSpec(
+                    boundaries=[
+                        -1.401298464324817e-45,
+                        1.401298464324817e-45,
+                        105.49999237060547,
+                    ],
+                    original_num_unique_values=10,
+                    maximum_num_bins=4,
+                    min_obs_in_bins=3,
+                ),
+            ),
+            self.col_spec_f2_discretized(data_format),
+        ],
+        created_num_rows=10,
+    )
+    data = self.create_data(data_format)
+    ds = dataset.create_vertical_dataset(data, data_spec=data_spec)
+    self.assertEqual(
+        ds._dataset.DebugString(),
+        """f1,f2
+52.75,120
+52.75,116
+52.75,116
+52.75,116
+52.75,112
+106.5,109
+106.5,109
+106.5,53.5
+106.5,53.5
+106.5,53.5
+""",
+    )
 
 
 if __name__ == "__main__":

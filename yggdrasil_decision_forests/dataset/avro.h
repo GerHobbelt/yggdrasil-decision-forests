@@ -19,7 +19,9 @@
 #define YGGDRASIL_DECISION_FORESTS_DATASET_AVRO_H_
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <string>
 #include <vector>
@@ -27,9 +29,7 @@
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "yggdrasil_decision_forests/utils/bytestream.h"
-#include "yggdrasil_decision_forests/utils/filesystem.h"
 
 namespace yggdrasil_decision_forests::dataset::avro {
 
@@ -57,12 +57,20 @@ enum class AvroCodec {
 struct AvroField {
   std::string name;
   AvroType type;
+  bool optional = false;  // If the type is ["null", <something> ].
+
   AvroType sub_type = AvroType::kUnknown;  // Only used if type==kArray.
-  bool optional = false;  // If the field is ["null", <something> ].
+  bool sub_optional = false;  // If the sub_type is ["null", <something> ].
+
+  AvroType sub_sub_type = AvroType::kUnknown;  // Only used if sub_type==kArray.
+  bool sub_sub_optional = false;
 
   bool operator==(const AvroField& other) const {
     return name == other.name && type == other.type &&
-           optional == other.optional && sub_type == other.sub_type;
+           optional == other.optional && sub_type == other.sub_type &&
+           sub_optional == other.sub_optional &&
+           sub_sub_type == other.sub_sub_type &&
+           sub_sub_optional == other.sub_sub_optional;
   }
 
   friend std::ostream& operator<<(std::ostream& os, const AvroField& field);
@@ -87,24 +95,39 @@ class AvroReader {
   absl::Status SkipAllFieldsInRecord();
 
   // Reads the next field. Returns nullopt if the field is optional and not set.
-  absl::StatusOr<absl::optional<bool>> ReadNextFieldBoolean(
+  absl::StatusOr<std::optional<bool>> ReadNextFieldBoolean(
       const AvroField& field);
-  absl::StatusOr<absl::optional<int64_t>> ReadNextFieldInteger(
+  absl::StatusOr<std::optional<int64_t>> ReadNextFieldInteger(
       const AvroField& field);
-  absl::StatusOr<absl::optional<float>> ReadNextFieldFloat(
+  absl::StatusOr<std::optional<float>> ReadNextFieldFloat(
       const AvroField& field);
-  absl::StatusOr<absl::optional<double>> ReadNextFieldDouble(
+  absl::StatusOr<std::optional<double>> ReadNextFieldDouble(
       const AvroField& field);
+
   absl::StatusOr<bool> ReadNextFieldString(const AvroField& field,
                                            std::string* value);
   absl::StatusOr<bool> ReadNextFieldArrayFloat(const AvroField& field,
                                                std::vector<float>* values);
   absl::StatusOr<bool> ReadNextFieldArrayDouble(const AvroField& field,
                                                 std::vector<double>* values);
+
+  template <typename T, typename R = T>
+  absl::StatusOr<bool> ReadNextFieldArrayFloatingPointTemplate(
+      const AvroField& field, std::vector<T>* values);
+
   absl::StatusOr<bool> ReadNextFieldArrayDoubleIntoFloat(
       const AvroField& field, std::vector<float>* values);
   absl::StatusOr<bool> ReadNextFieldArrayString(
       const AvroField& field, std::vector<std::string>* values);
+
+  absl::StatusOr<bool> ReadNextFieldArrayArrayFloat(
+      const AvroField& field, std::vector<std::vector<float>>* values);
+  absl::StatusOr<bool> ReadNextFieldArrayArrayDoubleIntoFloat(
+      const AvroField& field, std::vector<std::vector<float>>* values);
+
+  template <typename T, typename R = T>
+  absl::StatusOr<bool> ReadNextFieldArrayArrayFloatingPointTemplate(
+      const AvroField& field, std::vector<std::vector<T>>* values);
 
   // Closes the reader.
   absl::Status Close();
@@ -115,6 +138,8 @@ class AvroReader {
   const std::vector<AvroField>& fields() const { return fields_; }
 
   const std::string& sync_marker() const { return sync_marker_; }
+
+  const std::string& schema_string() const { return schema_string_; }
 
  private:
   AvroReader(std::unique_ptr<utils::InputByteStream>&& stream);
@@ -138,10 +163,13 @@ class AvroReader {
   std::string current_block_;
   std::string current_block_decompressed_;
   std::string zlib_working_buffer_;
-  absl::optional<utils::StringViewInputByteStream> current_block_reader_;
+  std::optional<utils::StringViewInputByteStream> current_block_reader_;
 
   size_t num_objects_in_current_block_ = 0;
   size_t next_object_in_current_block_ = 0;
+
+  // Raw schema of the file.
+  std::string schema_string_;
 };
 
 namespace internal {
@@ -151,6 +179,9 @@ absl::StatusOr<int64_t> ReadInteger(utils::InputByteStream* stream);
 absl::StatusOr<double> ReadDouble(utils::InputByteStream* stream);
 absl::StatusOr<float> ReadFloat(utils::InputByteStream* stream);
 absl::StatusOr<bool> ReadBoolean(utils::InputByteStream* stream);
+
+template <typename T>
+absl::StatusOr<T> ReadFloatingPointTemplate(utils::InputByteStream* stream);
 
 }  // namespace internal
 

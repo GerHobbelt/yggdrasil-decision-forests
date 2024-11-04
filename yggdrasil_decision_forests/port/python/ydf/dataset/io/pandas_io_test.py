@@ -16,6 +16,7 @@
 
 from absl.testing import absltest
 import pandas as pd
+import polars as pl
 
 from ydf.dataset.io import pandas_io
 
@@ -25,6 +26,9 @@ class PandasIOTest(absltest.TestCase):
   def test_is_pandas(self):
     self.assertTrue(pandas_io.is_pandas_dataframe(pd.DataFrame()))
     self.assertFalse(pandas_io.is_pandas_dataframe({}))
+
+  def test_polars_is_not_pandas(self):
+    self.assertFalse(pandas_io.is_pandas_dataframe(pl.DataFrame()))
 
 
 if __name__ == "__main__":

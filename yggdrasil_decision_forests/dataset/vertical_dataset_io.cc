@@ -15,17 +15,21 @@
 
 #include "yggdrasil_decision_forests/dataset/vertical_dataset_io.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
-#include <type_traits>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "absl/log/log.h"
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/example.pb.h"
 #include "yggdrasil_decision_forests/dataset/example_reader.h"
@@ -33,7 +37,6 @@
 #include "yggdrasil_decision_forests/dataset/example_writer.h"
 #include "yggdrasil_decision_forests/dataset/example_writer_interface.h"
 #include "yggdrasil_decision_forests/dataset/formats.h"
-#include "yggdrasil_decision_forests/dataset/formats.pb.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/utils/concurrency_streamprocessor.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
@@ -51,7 +54,7 @@ namespace {
 absl::Status LoadVerticalDatasetSingleThread(
     const absl::string_view typed_path,
     const proto::DataSpecification& data_spec, VerticalDataset* dataset,
-    const absl::optional<std::vector<int>>& required_columns,
+    const std::optional<std::vector<int>>& required_columns,
     const LoadConfig& config) {
   // Initialize dataset.
   dataset->set_data_spec(data_spec);
@@ -103,9 +106,9 @@ struct BlockOfExamples {
 // Reads a shard.
 absl::StatusOr<std::unique_ptr<BlockOfExamples>> LoadShard(
     const proto::DataSpecification& data_spec, const absl::string_view prefix,
-    const absl::optional<std::vector<int>>& required_columns,
+    const std::optional<std::vector<int>>& required_columns,
     const absl::string_view shard) {
-  auto block = absl::make_unique<BlockOfExamples>();
+  auto block = std::make_unique<BlockOfExamples>();
   ASSIGN_OR_RETURN(auto reader,
                    CreateExampleReader(absl::StrCat(prefix, ":", shard),
                                        data_spec, required_columns));
@@ -123,7 +126,7 @@ absl::StatusOr<std::unique_ptr<BlockOfExamples>> LoadShard(
 absl::Status LoadVerticalDataset(
     const absl::string_view typed_path,
     const proto::DataSpecification& data_spec, VerticalDataset* dataset,
-    const absl::optional<std::vector<int>>& required_columns,
+    const std::optional<std::vector<int>>& required_columns,
     const LoadConfig& config) {
   // Extract the shards from the dataset path.
   std::string path, prefix;

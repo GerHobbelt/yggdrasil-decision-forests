@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <iterator>
@@ -39,7 +40,6 @@
 #include "absl/strings/str_split.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
-#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/example.pb.h"
@@ -111,7 +111,8 @@ bool IsMultiDimensional(ColumnType type) {
   return type == ColumnType::CATEGORICAL_SET ||
          type == ColumnType::NUMERICAL_SET ||
          type == ColumnType::NUMERICAL_LIST ||
-         type == ColumnType::CATEGORICAL_LIST;
+         type == ColumnType::CATEGORICAL_LIST ||
+         type == ColumnType::NUMERICAL_VECTOR_SEQUENCE;
 }
 
 bool IsCategorical(ColumnType type) {
@@ -123,7 +124,8 @@ bool IsCategorical(ColumnType type) {
 bool IsNumerical(ColumnType type) {
   return type == ColumnType::NUMERICAL_SET || type == ColumnType::NUMERICAL ||
          type == ColumnType::NUMERICAL_LIST ||
-         type == ColumnType::DISCRETIZED_NUMERICAL;
+         type == ColumnType::DISCRETIZED_NUMERICAL ||
+         type == ColumnType::NUMERICAL_VECTOR_SEQUENCE;
 }
 
 int32_t CategoricalStringToValue(const std::string& value,
@@ -165,7 +167,7 @@ absl::StatusOr<int32_t> CategoricalStringToValueWithStatus(
 absl::Status BuildColIdxToFeatureLabelIdx(
     const proto::DataSpecification& data_spec,
     const std::vector<std::string>& fields,
-    const absl::optional<std::vector<int>>& required_columns,
+    const std::optional<std::vector<int>>& required_columns,
     std::vector<int>* col_idx_to_field_idx) {
   col_idx_to_field_idx->resize(data_spec.columns_size());
   for (int col_idx = 0; col_idx < data_spec.columns_size(); col_idx++) {
@@ -267,7 +269,7 @@ absl::StatusOr<int> GetColumnIdxFromNameWithStatus(
       absl::Substitute("Unknown column $0", name));
 }
 
-absl::optional<int> GetOptionalColumnIdxFromName(
+std::optional<int> GetOptionalColumnIdxFromName(
     absl::string_view name, const proto::DataSpecification& data_spec) {
   for (int col_idx = 0; col_idx < data_spec.columns_size(); col_idx++) {
     if (data_spec.columns(col_idx).name() == name) {
@@ -410,6 +412,10 @@ absl::Status CsvRowToExample(const std::vector<std::string>& csv_fields,
         }
         dst_value->set_hash(HashColumnString(value));
       } break;
+      case ColumnType::NUMERICAL_VECTOR_SEQUENCE:
+        return absl::UnimplementedError(
+            "Vector sequence is not supported in csv files");
+        break;
     }
   }
   return absl::OkStatus();
@@ -471,6 +477,11 @@ absl::Status ExampleToCsvRow(const proto::Example& example,
         break;
       case proto::Example::Attribute::TypeCase::kHash:
         dst_value = absl::StrCat(src_value.hash());
+        break;
+
+      case proto::Example::Attribute::TypeCase::kNumericalVectorSequence:
+        return absl::UnimplementedError(
+            "Vector sequence is not supported in csv files");
         break;
     }
   }
@@ -578,6 +589,14 @@ std::string PrintHumanReadable(const proto::DataSpecification& data_spec,
         absl::SubstituteAndAppend(&result, " true_count:$0 false_count:$1",
                                   col.boolean().count_true(),
                                   col.boolean().count_false());
+      }
+
+      if (col.has_numerical_vector_sequence()) {
+        absl::SubstituteAndAppend(
+            &result, " dims:$0 min-vecs:$1 max-vecs:$2",
+            col.numerical_vector_sequence().vector_length(),
+            col.numerical_vector_sequence().min_num_vectors(),
+            col.numerical_vector_sequence().max_num_vectors());
       }
 
       if (col.has_categorical()) {
@@ -996,7 +1015,10 @@ std::string UnstackedColumnName(const absl::string_view original_name,
 
 std::vector<std::string> UnstackedColumnNamesV2(absl::string_view original_name,
                                                 int num_dims) {
-  const int num_leading_zeroes = std::log10(num_dims) + 1;
+  int num_leading_zeroes = 1;
+  if (num_dims > 0) {
+    num_leading_zeroes = std::log10(num_dims) + 1;
+  }
   std::vector<std::string> result;
   result.reserve(num_dims);
   for (int dim_idx = 0; dim_idx < num_dims; dim_idx++) {

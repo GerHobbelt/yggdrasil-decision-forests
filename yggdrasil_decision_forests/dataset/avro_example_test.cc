@@ -19,6 +19,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "absl/log/log.h"
 #include "absl/strings/str_cat.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
@@ -396,7 +397,7 @@ SIMPLE_PARAMETERIZED_TEST(ReadExample, ReadExampleCase,
     attributes { categorical: 1 }
     attributes { categorical: 1 }
     attributes { numerical: 6.1 }
-    attributes { categorical_set { values: 4 values: 3 values: 1 } }
+    attributes { categorical_set { values: 1 values: 3 values: 4 } }
     attributes { numerical: 1 }
     attributes { numerical: 2 }
     attributes { numerical: 3 }
@@ -443,6 +444,93 @@ SIMPLE_PARAMETERIZED_TEST(ReadExample, ReadExampleCase,
   ASSERT_FALSE(has_next);
 }
 
+TEST(ReadExample, ReadExampleCaseToy2) {
+  // Data generated with Polars as follows:
+  //
+  // pl.DataFrame({
+  //     "f1": [1.0, 2.0, 3.0, None],
+  //     "i1": [1, 2, 3, None],
+  //     "c1": ["x", "y", "x", None],
+  //     "cs1": [["a", "b"], None, [""], ["a", None]],
+  //     #"cs1": [["a", "b"], None, [], ["a", None]],
+  //     "multi_f1": [None, [None, 4.0], [5.0, 6.0], [6.0, 7.0]],
+  // }).write_avro(p, compression="uncompressed")
+  //
+  // In the current version of Polars (internal 0.20.16), there is a bug when
+  // writing empty arrays: One byte is missing (confirmed by comparing binary to
+  // fastavro and ydf c++ code).
+  // TODO: Switch the "cs1" above when fixed.
+
+  dataset::proto::DataSpecificationGuide guide;
+
+  {
+    auto* col = guide.add_column_guides();
+    col->set_column_name_pattern("^cs1$");
+    col->set_type(proto::ColumnType::CATEGORICAL_SET);
+  }
+
+  guide.mutable_default_column_guide()
+      ->mutable_categorial()
+      ->set_min_vocab_frequency(1);
+  const auto path = file::JoinPath(DatasetDir(), "toy2_codex-null.avro");
+  ASSERT_OK_AND_ASSIGN(const auto dataspec, CreateDataspec(path, guide));
+
+  AvroExampleReader reader(dataspec, {});
+  ASSERT_OK(reader.Open(path));
+  proto::Example example;
+  ASSERT_OK_AND_ASSIGN(bool has_next, reader.Next(&example));
+  ASSERT_TRUE(has_next);
+
+  const proto::Example expected_1 = PARSE_TEST_PROTO(R"pb(
+    attributes { numerical: 1 }
+    attributes { numerical: 1 }
+    attributes { categorical: 1 }
+    attributes { categorical_set { values: 1 values: 3 } }
+    attributes {}
+    attributes {}
+  )pb");
+  EXPECT_THAT(example, EqualsProto(expected_1));
+
+  ASSERT_OK_AND_ASSIGN(has_next, reader.Next(&example));
+  ASSERT_TRUE(has_next);
+  const proto::Example expected_2 = PARSE_TEST_PROTO(R"pb(
+    attributes { numerical: 2 }
+    attributes { numerical: 2 }
+    attributes { categorical: 2 }
+    attributes {}
+    attributes {}
+    attributes { numerical: 4 }
+  )pb");
+  EXPECT_THAT(example, EqualsProto(expected_2));
+
+  ASSERT_OK_AND_ASSIGN(has_next, reader.Next(&example));
+  ASSERT_TRUE(has_next);
+  const proto::Example expected_3 = PARSE_TEST_PROTO(R"pb(
+    attributes { numerical: 3 }
+    attributes { numerical: 3 }
+    attributes { categorical: 1 }
+    attributes { categorical_set { values: 2 } }
+    attributes { numerical: 5 }
+    attributes { numerical: 6 }
+  )pb");
+  EXPECT_THAT(example, EqualsProto(expected_3));
+
+  ASSERT_OK_AND_ASSIGN(has_next, reader.Next(&example));
+  ASSERT_TRUE(has_next);
+  const proto::Example expected_4 = PARSE_TEST_PROTO(R"pb(
+    attributes {}
+    attributes {}
+    attributes {}
+    attributes { categorical_set { values: 1 values: 2 } }
+    attributes { numerical: 6 }
+    attributes { numerical: 7 }
+  )pb");
+  EXPECT_THAT(example, EqualsProto(expected_4));
+
+  ASSERT_OK_AND_ASSIGN(has_next, reader.Next(&example));
+  ASSERT_FALSE(has_next);
+}
+
 TEST(CreateReaderRegistration, Base) {
   const auto dataset_path = absl::StrCat(
       "avro:", file::JoinPath(DatasetDir(), "toy_codex-deflate.avro"));
@@ -477,6 +565,70 @@ TEST(CreateReaderRegistration, Base) {
     num_rows++;
   }
   EXPECT_EQ(num_rows, 2);
+}
+
+struct NumericalVectorSequenceCase {
+  std::string filename;
+};
+
+SIMPLE_PARAMETERIZED_TEST(NumericalVectorSequence, NumericalVectorSequenceCase,
+                          {{"toy_vector_sequence_from_fastavro.avro"},
+                           {"toy_vector_sequence_from_fastavro_v2.avro"},
+                           {"toy_vector_sequence_from_polars.avro"}}) {
+  const auto& test_case = GetParam();
+  const auto dataset_path =
+      absl::StrCat("avro:", file::JoinPath(DatasetDir(), test_case.filename));
+
+  proto::DataSpecificationGuide guide;
+  {
+    auto* col = guide.add_column_guides();
+    col->set_column_name_pattern("^f1$");
+    col->set_type(proto::ColumnType::NUMERICAL_VECTOR_SEQUENCE);
+  }
+
+  proto::DataSpecification data_spec;
+  CreateDataSpec(dataset_path, false, guide, &data_spec);
+  LOG(INFO) << "Dataspec:\n" << dataset::PrintHumanReadable(data_spec);
+  EXPECT_EQ(dataset::PrintHumanReadable(data_spec), R"(Number of records: 100
+Number of columns: 2
+
+Number of columns by type:
+	NUMERICAL_VECTOR_SEQUENCE: 1 (50%)
+	CATEGORICAL: 1 (50%)
+
+Columns:
+
+NUMERICAL_VECTOR_SEQUENCE: 1 (50%)
+	1: "f1" NUMERICAL_VECTOR_SEQUENCE manually-defined mean:0.498165 min:0.000545965 max:0.999809 sd:0.289278 dims:2 min-vecs:1 max-vecs:9
+
+CATEGORICAL: 1 (50%)
+	0: "label" CATEGORICAL has-dict vocab-size:3 zero-ood-items most-frequent:"0" 53 (53%)
+
+Terminology:
+	nas: Number of non-available (i.e. missing) values.
+	ood: Out of dictionary.
+	manually-defined: Attribute whose type is manually defined by the user, i.e., the type was not automatically inferred.
+	tokenized: The attribute value is obtained through tokenization.
+	has-dict: The attribute is attached to a string dictionary e.g. a categorical attribute stored as a string.
+	vocab-size: Number of unique values.
+)");
+
+  auto reader = CreateExampleReader(dataset_path, data_spec).value();
+  proto::Example example;
+  int num_rows = 0;
+  while (reader->Next(&example).value()) {
+    // LOG(INFO) << "Example: " << example;
+    EXPECT_GE(example.attributes(0).numerical_vector_sequence().vectors_size(),
+              0);
+    EXPECT_LE(example.attributes(0).numerical_vector_sequence().vectors_size(),
+              10);
+    for (const auto& vector :
+         example.attributes(0).numerical_vector_sequence().vectors()) {
+      EXPECT_EQ(vector.values_size(), 2);
+    }
+    num_rows++;
+  }
+  EXPECT_EQ(num_rows, 100);
 }
 
 }  // namespace

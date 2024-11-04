@@ -18,12 +18,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <functional>
 #include <iterator>
-#include <memory>
-#include <optional>
 #include <random>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -34,8 +30,6 @@
 #include "yggdrasil_decision_forests/dataset/data_spec.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/example.pb.h"
-#include "yggdrasil_decision_forests/dataset/example_reader.h"
-#include "yggdrasil_decision_forests/dataset/example_reader_interface.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/dataset/weight.h"
 #include "yggdrasil_decision_forests/model/abstract_model.h"
@@ -122,8 +116,8 @@ absl::StatusOr<int> GetPerAttributeBinIdx(
       const auto it =
           std::upper_bound(boundaries.begin(), boundaries.end(), value);
       const int idx = std::distance(boundaries.begin(), it);
-      return utils::clamp(idx, 0,
-                          attribute_info.num_bins_per_input_feature() - 1);
+      return std::clamp(idx, 0,
+                        attribute_info.num_bins_per_input_feature() - 1);
     }
     case dataset::proto::ColumnType::CATEGORICAL:
       return example.attributes(attribute_idx).categorical();
@@ -496,7 +490,7 @@ absl::StatusOr<proto::PartialDependencePlotSet> ComputePartialDependencePlotSet(
     const dataset::VerticalDataset& dataset, const model::AbstractModel& model,
     const std::vector<std::vector<int>>& attribute_idxs,
     const int num_numerical_bins, const float example_sampling,
-    const absl::optional<float> maximum_duration_seconds) {
+    const std::optional<float> maximum_duration_seconds) {
   LOG(INFO) << "Initiate PDP accumulator";
   ASSIGN_OR_RETURN(auto pdp_set,
                    InitializePartialDependencePlotSet(
@@ -509,7 +503,7 @@ absl::StatusOr<proto::PartialDependencePlotSet> ComputePartialDependencePlotSet(
   std::default_random_engine random;
   std::uniform_real_distribution<float> dist_unif_unit;
 
-  absl::optional<absl::Time> cutoff_time;
+  std::optional<absl::Time> cutoff_time;
   if (maximum_duration_seconds.has_value()) {
     cutoff_time = absl::Now() + absl::Seconds(maximum_duration_seconds.value());
   }
@@ -540,7 +534,7 @@ ComputeConditionalExpectationPlotSet(
     const dataset::VerticalDataset& dataset, const model::AbstractModel& model,
     const std::vector<std::vector<int>>& attribute_idxs,
     const int num_numerical_bins, const float example_sampling,
-    const absl::optional<float> maximum_duration_seconds) {
+    const std::optional<float> maximum_duration_seconds) {
   LOG(INFO) << "Initiate CEP accumulator";
   ASSIGN_OR_RETURN(auto pdp_set,
                    InitializeConditionalExpectationPlotSet(
@@ -553,7 +547,7 @@ ComputeConditionalExpectationPlotSet(
   std::default_random_engine random;
   std::uniform_real_distribution<float> dist_unif_01;
 
-  absl::optional<absl::Time> cutoff_time;
+  std::optional<absl::Time> cutoff_time;
   if (maximum_duration_seconds.has_value()) {
     cutoff_time = absl::Now() + absl::Seconds(maximum_duration_seconds.value());
   }

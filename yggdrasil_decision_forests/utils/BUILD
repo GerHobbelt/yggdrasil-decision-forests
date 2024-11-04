@@ -105,7 +105,6 @@ cc_library_ydf(
         ":protobuf",
         ":status_macros",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -130,13 +129,13 @@ cc_library_ydf(
         "YGG_FILESYSTEM_USES_TENSORFLOW",
     ],
     features = ["-use_header_modules"],  # Incompatible with -fexceptions.
+    tags = ["tf_dep"],
     visibility = ["//visibility:private"],
     deps = [
         ":bytestream",
         ":compatibility",
         ":logging",
         ":status_macros",
-        ":tensorflow",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/memory",
@@ -206,13 +205,11 @@ cc_library_ydf(
 
 cc_library_ydf(
     name = "sharded_io_tfrecord",
-    hdrs = [
-        "sharded_io_tfrecord.h",
-    ],
+    hdrs = ["sharded_io_tfrecord.h"],
+    tags = ["tf_dep"],
     deps = [
         ":sharded_io",
         ":status_macros",
-        ":tensorflow",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
@@ -267,7 +264,6 @@ cc_library_ydf(
     ],
     deps = [
         ":synchronization_primitives",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -343,9 +339,7 @@ cc_library_ydf(
         ":status_macros",
         ":synchronization_primitives",
         "@com_google_absl//absl/log",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -460,7 +454,6 @@ cc_library_ydf(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -481,7 +474,6 @@ cc_library_ydf(
         ":synchronization_primitives",
         "@com_google_absl//absl/base:core_headers",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
     ],
@@ -507,7 +499,6 @@ cc_library_ydf(
         "adaptive_work.h",
     ],
     deps = [
-        ":compatibility",
         ":logging",
         ":synchronization_primitives",
     ],
@@ -567,7 +558,6 @@ cc_library_ydf(
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -620,13 +610,11 @@ cc_library_ydf(
         "//yggdrasil_decision_forests/serving/decision_forest",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/random",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:optional",
         "@com_google_googletest//:gtest",
     ],
 )
@@ -683,26 +671,9 @@ cc_library_ydf(
 )
 
 cc_library_ydf(
-    name = "tensorflow",
-    hdrs = ["tensorflow.h"],
-    deps = [
-        "@com_google_absl//absl/base:core_headers",
-        "@com_google_absl//absl/status",
-        "@com_google_absl//absl/strings",
-    ] + select({
-        "//yggdrasil_decision_forests:tensorflow_with_header_lib": [
-            "@release_or_nightly//:tensorflow_libtensorflow_framework",
-            "@release_or_nightly//:tensorflow_tf_header_lib",
-        ],
-        "//conditions:default": ["@org_tensorflow//tensorflow/core/platform:status"],
-    }),
-)
-
-cc_library_ydf(
     name = "compatibility",
     hdrs = ["compatibility.h"],
     deps = [
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -791,11 +762,9 @@ cc_library_ydf(
         ":logging",
         ":status_macros",
         ":uid",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -827,7 +796,6 @@ cc_library_ydf(
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -847,8 +815,6 @@ cc_library_ydf(
         "//yggdrasil_decision_forests/dataset:data_spec",
         "//yggdrasil_decision_forests/dataset:data_spec_cc_proto",
         "//yggdrasil_decision_forests/dataset:example_cc_proto",
-        "//yggdrasil_decision_forests/dataset:example_reader",
-        "//yggdrasil_decision_forests/dataset:example_reader_interface",
         "//yggdrasil_decision_forests/dataset:vertical_dataset",
         "//yggdrasil_decision_forests/dataset:weight",
         "//yggdrasil_decision_forests/model:abstract_model",
@@ -857,9 +823,7 @@ cc_library_ydf(
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
-        "@com_google_absl//absl/strings",
         "@com_google_absl//absl/time",
-        "@com_google_absl//absl/types:optional",
     ],
 )
 
@@ -894,7 +858,6 @@ cc_library_ydf(
         ":bytestream",
         ":status_macros",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -1096,8 +1059,6 @@ cc_test(
         # "@com_google_googletest//:gtest_main",  # When fixed
         "@com_google_googletest//:gtest_main",
         "@com_google_absl//absl/status",
-        "@com_google_absl//absl/types:optional",
-        "//yggdrasil_decision_forests/utils:status_macros",
     ],
 )
 
@@ -1214,7 +1175,6 @@ cc_test(
         ":test",
         "//yggdrasil_decision_forests/dataset:csv_example_reader",
         "//yggdrasil_decision_forests/dataset:csv_example_writer",
-        "//yggdrasil_decision_forests/dataset:example_reader",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -1279,7 +1239,6 @@ cc_test(
         ":test",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
         "@com_google_googletest//:gtest_main",
     ],
@@ -1310,7 +1269,6 @@ cc_test(
         "//yggdrasil_decision_forests/model/random_forest",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_googletest//:gtest_main",
     ],

@@ -13,14 +13,18 @@
  * limitations under the License.
  */
 
+#include <memory>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <vector>
+
 #include "absl/log/check.h"
 #include "absl/log/log.h"
-#include "absl/memory/memory.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
-#include "absl/types/optional.h"
 #if defined YGG_TFRECORD_PREDICTIONS
 #include "yggdrasil_decision_forests/utils/sharded_io_tfrecord.h"
 #endif
@@ -58,7 +62,7 @@ absl::Status ExportPredictions(
     model::proto::Task task, const dataset::proto::Column& label_column,
     absl::string_view typed_prediction_path,
     const int num_records_by_shard_in_output,
-    const absl::optional<std::string> prediction_key,
+    const std::optional<std::string> prediction_key,
     const PredictionFormat format) {
   // Determines the container for the predictions.
   std::string prediction_path, prediction_format;
@@ -69,7 +73,7 @@ absl::Status ExportPredictions(
   if (prediction_format == "tfrecord+pred") {
     // Save the prediction as a tfrecord of proto::Predictions.
     auto prediction_writer =
-        absl::make_unique<TFRecordShardedWriter<model::proto::Prediction>>();
+        std::make_unique<TFRecordShardedWriter<model::proto::Prediction>>();
     RETURN_IF_ERROR(prediction_writer->Open(prediction_path,
                                             num_records_by_shard_in_output));
     for (const auto& prediction : predictions) {
@@ -101,7 +105,7 @@ absl::Status PredictionToExample(
     model::proto::Task task, const dataset::proto::Column& label_col,
     const model::proto::Prediction& prediction,
     dataset::proto::Example* prediction_as_example,
-    const absl::optional<std::string> prediction_key,
+    const std::optional<std::string> prediction_key,
     const PredictionFormat format) {
   prediction_as_example->clear_attributes();
   switch (task) {
@@ -177,6 +181,10 @@ absl::Status PredictionToExample(
             prediction.uplift().treatment_effect(effect_idx));
       }
     } break;
+    case model::proto::Task::ANOMALY_DETECTION:
+      prediction_as_example->add_attributes()->set_numerical(
+          prediction.anomaly_detection().value());
+      break;
     default:
       return absl::InvalidArgumentError("Non supported class");
   }
@@ -265,7 +273,7 @@ absl::Status ExampleToPrediction(
 
 absl::StatusOr<dataset::proto::DataSpecification> PredictionDataspec(
     const model::proto::Task task, const dataset::proto::Column& label_col,
-    const absl::optional<std::string> prediction_key,
+    const std::optional<std::string> prediction_key,
     const PredictionFormat format) {
   dataset::proto::DataSpecification dataspec;
 
@@ -306,6 +314,7 @@ absl::StatusOr<dataset::proto::DataSpecification> PredictionDataspec(
     } break;
     case model::proto::Task::REGRESSION:
     case model::proto::Task::RANKING:
+    case model::proto::Task::ANOMALY_DETECTION:
       dataset::AddColumn(label_col.name(),
                          dataset::proto::ColumnType::NUMERICAL, &dataspec);
       break;

@@ -16,6 +16,7 @@
 #include "yggdrasil_decision_forests/dataset/data_spec.h"
 
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -669,6 +670,8 @@ TEST(Dataset, UnstackedColumnNamesV2) {
   EXPECT_EQ(item_300[0], "a.000_of_300");
   EXPECT_EQ(item_300[1], "a.001_of_300");
   EXPECT_EQ(item_300[299], "a.299_of_300");
+
+  EXPECT_THAT(UnstackedColumnNamesV2("a", 0), ElementsAre());
 }
 
 }  // namespace

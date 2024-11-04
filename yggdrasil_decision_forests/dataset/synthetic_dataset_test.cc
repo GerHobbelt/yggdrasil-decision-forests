@@ -14,7 +14,9 @@
  */
 
 #include "yggdrasil_decision_forests/dataset/synthetic_dataset.h"
+#include <string>
 
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "absl/log/check.h"
 #include "absl/log/log.h"
@@ -50,7 +52,7 @@ proto::DataSpecification GetDataSpec(const absl::string_view path,
 TEST(SyntheticDataset, BinaryClassification) {
   proto::SyntheticDatasetOptions options;
   const auto dst_path = absl::StrCat(
-      "tfrecord+tfe:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
+      "tfrecord:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
   CHECK_OK(GenerateSyntheticDataset(options, dst_path));
 
   const auto data_spec = GetDataSpec(dst_path);
@@ -62,7 +64,7 @@ TEST(SyntheticDataset, MultiClassClassification) {
   proto::SyntheticDatasetOptions options;
   options.mutable_classification()->set_num_classes(3);
   const auto dst_path = absl::StrCat(
-      "tfrecord+tfe:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
+      "tfrecord:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
   CHECK_OK(GenerateSyntheticDataset(options, dst_path));
 
   const auto data_spec = GetDataSpec(dst_path);
@@ -74,7 +76,7 @@ TEST(SyntheticDataset, Regression) {
   proto::SyntheticDatasetOptions options;
   options.mutable_regression();
   const auto dst_path = absl::StrCat(
-      "tfrecord+tfe:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
+      "tfrecord:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
   CHECK_OK(GenerateSyntheticDataset(options, dst_path));
 
   const auto data_spec = GetDataSpec(dst_path);
@@ -93,7 +95,7 @@ TEST(SyntheticDataset, MultidimensionalNumerical) {
 
   options.mutable_classification();
   const auto dst_path = absl::StrCat(
-      "tfrecord+tfe:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
+      "tfrecord:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
   CHECK_OK(GenerateSyntheticDataset(options, dst_path));
 
   proto::DataSpecificationGuide guide;
@@ -115,7 +117,7 @@ TEST(SyntheticDataset, MultidimensionalNumericalInt) {
 
   options.mutable_classification();
   const auto dst_path = absl::StrCat(
-      "tfrecord+tfe:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
+      "tfrecord:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
   CHECK_OK(GenerateSyntheticDataset(options, dst_path));
 
   proto::DataSpecificationGuide guide;
@@ -136,7 +138,7 @@ TEST(SyntheticDataset, MultidimensionalNumericalDiscretized) {
 
   options.mutable_classification();
   const auto dst_path = absl::StrCat(
-      "tfrecord+tfe:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
+      "tfrecord:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
   CHECK_OK(GenerateSyntheticDataset(options, dst_path));
 
   proto::DataSpecificationGuide guide;
@@ -168,7 +170,7 @@ TEST(SyntheticDataset, Ranking) {
   proto::SyntheticDatasetOptions options;
   options.mutable_ranking();
   const auto dst_path = absl::StrCat(
-      "tfrecord+tfe:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
+      "tfrecord:", file::JoinPath(test::TmpDirectory(), "dataset.tfr"));
   CHECK_OK(GenerateSyntheticDataset(options, dst_path));
 
   const auto data_spec = GetDataSpec(dst_path);

@@ -14,15 +14,16 @@
  */
 
 #include "yggdrasil_decision_forests/utils/filesystem_default.h"
-#include "absl/memory/memory.h"
 
-#if __cplusplus > 201402L
+#include <algorithm>
+#include <exception>
 #include <filesystem>
-#else
-#include <experimental/filesystem>
-#endif
+#include <initializer_list>
 #include <ios>
+#include <memory>
 #include <regex>  // NOLINT
+#include <string>
+#include <vector>
 
 #include "absl/status/status.h"
 #include "absl/strings/numbers.h"
@@ -33,11 +34,7 @@
 #include "yggdrasil_decision_forests/utils/logging.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
 
-#if __cplusplus > 201402L
 namespace fs = std::filesystem;
-#else
-namespace fs = std::experimental::filesystem;
-#endif
 
 // Converts a absl::string_view into an object compatible with std::filesystem.
 #ifdef ABSL_USES_STD_STRING_VIEW
@@ -47,8 +44,6 @@ namespace fs = std::experimental::filesystem;
 #endif
 
 namespace file {
-
-namespace ygg = ::yggdrasil_decision_forests;
 
 std::string JoinPathList(std::initializer_list<absl::string_view> paths) {
   fs::path all_paths;
@@ -110,7 +105,7 @@ absl::Status Match(absl::string_view pattern, std::vector<std::string>* results,
       }
     }
     if (error) {
-      return absl::InvalidArgumentError(error.message());
+      return absl::NotFoundError(error.message());
     }
 
     std::sort(results->begin(), results->end());
@@ -201,7 +196,7 @@ absl::Status FileOutputByteStream::Close() {
 
 absl::Status SetBinaryProto(absl::string_view path,
                             const google::protobuf::MessageLite& message, int unused) {
-  auto writer = absl::make_unique<FileOutputByteStream>();
+  auto writer = std::make_unique<FileOutputByteStream>();
   RETURN_IF_ERROR(writer->Open(path));
   auto write_status = writer->Write(message.SerializeAsString());
   RETURN_IF_ERROR(writer->Close());
@@ -210,7 +205,7 @@ absl::Status SetBinaryProto(absl::string_view path,
 
 absl::Status GetBinaryProto(absl::string_view path,
                             google::protobuf::MessageLite* message, int unused) {
-  auto reader = absl::make_unique<FileInputByteStream>();
+  auto reader = std::make_unique<FileInputByteStream>();
   RETURN_IF_ERROR(reader->Open(path));
   auto content_or = reader->ReadAll();
   RETURN_IF_ERROR(reader->Close());
@@ -227,7 +222,7 @@ absl::Status SetTextProto(absl::string_view path,
                           const google::protobuf::Message& message, int unused) {
   std::string content;
   google::protobuf::TextFormat::PrintToString(message, &content);
-  auto writer = absl::make_unique<FileOutputByteStream>();
+  auto writer = std::make_unique<FileOutputByteStream>();
   RETURN_IF_ERROR(writer->Open(path));
   auto write_status = writer->Write(content);
   RETURN_IF_ERROR(writer->Close());
@@ -236,7 +231,7 @@ absl::Status SetTextProto(absl::string_view path,
 
 absl::Status GetTextProto(absl::string_view path, google::protobuf::Message* message,
                           int unused) {
-  auto reader = absl::make_unique<FileInputByteStream>();
+  auto reader = std::make_unique<FileInputByteStream>();
   RETURN_IF_ERROR(reader->Open(path));
   auto content_or = reader->ReadAll();
   RETURN_IF_ERROR(reader->Close());
@@ -264,12 +259,6 @@ absl::Status Rename(absl::string_view from, absl::string_view to, int options) {
 std::string GetBasename(absl::string_view path) {
   try {
     auto filename = fs::path(std::string(path)).filename().string();
-#if __cplusplus == 201402L
-    // The experimental C++14 filesystem reports a . if the filename is empty.
-    if (filename == ".") {
-      return "";
-    }
-#endif
     return filename;
   } catch (const std::exception& e) {
     LOG(ERROR) << "Error parsing basename of " << path << ": " << e.what();

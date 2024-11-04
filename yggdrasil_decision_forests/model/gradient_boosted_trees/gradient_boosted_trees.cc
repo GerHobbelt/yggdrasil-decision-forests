@@ -22,6 +22,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -37,7 +38,6 @@
 #include "absl/strings/str_join.h"
 #include "absl/strings/string_view.h"
 #include "absl/strings/substitute.h"
-#include "absl/types/optional.h"
 #include "absl/types/span.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/example.pb.h"
@@ -51,7 +51,6 @@
 #include "yggdrasil_decision_forests/model/decision_tree/structure_analysis.h"
 #include "yggdrasil_decision_forests/model/gradient_boosted_trees/gradient_boosted_trees.pb.h"
 #include "yggdrasil_decision_forests/model/prediction.pb.h"
-#include "yggdrasil_decision_forests/utils/compatibility.h"
 #include "yggdrasil_decision_forests/utils/distribution.pb.h"
 #include "yggdrasil_decision_forests/utils/filesystem.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
@@ -233,7 +232,7 @@ absl::Status GradientBoostedTreesModel::Validate() const {
   return absl::OkStatus();
 }
 
-absl::optional<size_t> GradientBoostedTreesModel::ModelSizeInBytes() const {
+std::optional<size_t> GradientBoostedTreesModel::ModelSizeInBytes() const {
   return AbstractAttributesSizeInBytes() +
          decision_tree::EstimateSizeInByte(decision_trees_);
 }
@@ -404,7 +403,7 @@ void GradientBoostedTreesModel::Predict(
                        accumulator += node.regressor().top_value();
                      });
       if (task() == model::proto::REGRESSION) {
-        double clamped_accumulator = utils::clamp(accumulator, -19., 19.);
+        double clamped_accumulator = std::clamp(accumulator, -19., 19.);
         prediction->mutable_regression()->set_value(
             std::exp(clamped_accumulator));
       } else {

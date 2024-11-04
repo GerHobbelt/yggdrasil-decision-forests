@@ -23,6 +23,7 @@
 #ifndef YGGDRASIL_DECISION_FORESTS_DATASET_DATA_SPEC_INFERENCE_H_
 #define YGGDRASIL_DECISION_FORESTS_DATASET_DATA_SPEC_INFERENCE_H_
 
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -173,6 +174,11 @@ void UpdateComputeSpecBooleanFeature(float value, proto::Column* column);
 // Update the accumulator with a boolean feature value with a boolean
 // observation.
 void UpdateComputeSpecBooleanFeatureWithBool(bool value, proto::Column* column);
+
+// Update the accumulator with a vector sequence boolean feature observation
+absl::Status UpdateComputeSpecNumericalVectorSequenceWithArrayArrayNumerical(
+    const std::vector<std::vector<float>>& values, proto::Column* column,
+    proto::DataSpecificationAccumulator::Column* col_acc);
 
 // Update all the columns in a data spec with the appropriate guide information.
 // Used when inferring the column type from a csv file.
