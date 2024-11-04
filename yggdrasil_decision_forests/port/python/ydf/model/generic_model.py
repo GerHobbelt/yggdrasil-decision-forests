@@ -159,6 +159,19 @@ class GenericModel:
     """Returns the name of the model type."""
     return self._model.name()
 
+  def __getstate__(self):
+    log.warning(
+        "Model pickling is discouraged. To save a model on disk, use"
+        " `model.save(path)` and `... = ydf.load_model(path)` instead. To"
+        " serialize a model to bytes, use `data = model.serialize()` and"
+        " `... = ydf.deserialize_model(data)` instead.",
+        message_id=log.WarningMessage.DONT_USE_PICKLE,
+    )
+    return self._model.Serialize()
+
+  def __setstate__(self, state):
+    self._model = ydf.DeserializeModel(state)
+
   def task(self) -> Task:
     """Task solved by the model."""
     return Task._from_proto_type(self._model.task())  # pylint: disable=protected-access
@@ -327,6 +340,43 @@ Use `model.describe()` for more details
 
     with log.cc_log_context():
       self._model.Save(path, advanced_options.file_prefix)
+
+  def serialize(self) -> bytes:
+    """Serializes a model to a sequence of bytes (i.e. `bytes`).
+
+    A serialized model is equivalent to model saved with `model.save`. It can
+    possibly contain meta-data related to model training and interpretation. To
+    minimize the size of a serialized model, removes this meta-data by passing
+    the argument `pure_serving_model=True` to the `train` method.
+
+    Usage example:
+
+    ```python
+    import pandas as pd
+    import ydf
+
+    # Create a model
+    dataset = pd.DataFrame({"feature": [0, 1], "label": [0, 1]})
+    learner = ydf.RandomForestLearner(label="label")
+    model = learner.train(dataset)
+
+    # Serialize model
+    # Note: serialized_model is a bytes.
+    serialized_model = model.serialize()
+
+    # Deserialize model
+    deserialized_model = ydf.deserialize_model(serialized_model)
+
+    # Make predictions
+    model.predict(dataset)
+    deserialized_model.predict(dataset)
+    ```
+
+    Returns:
+      The serialized model.
+    """
+    with log.cc_log_context():
+      return self._model.Serialize()
 
   def predict(self, data: dataset.InputDataset) -> np.ndarray:
     """Returns the predictions of the model on the given dataset.
@@ -936,6 +986,7 @@ Use `model.describe()` for more details
       jit: bool = True,
       apply_activation: bool = True,
       leaves_as_params: bool = False,
+      compatibility: Union[str, "export_jax.Compatibility"] = "XLA",
   ) -> "export_jax.JaxModel":
     """Converts the YDF model into a JAX function.
 
@@ -972,6 +1023,8 @@ Use `model.describe()` for more details
       leaves_as_params: If true, exports the leaf values as learnable
         parameters. In this case, `params` is set in the returned value, and it
         should be passed to `predict(feature_values, params)`.
+      compatibility: Constraint on the YDF->JAX conversion to runtime
+        compatibility. Can be "XLA" (default), and "TFL" (for TensorFlow Lite).
 
     Returns:
       A dataclass containing the JAX prediction function (`predict`) and
@@ -984,6 +1037,7 @@ Use `model.describe()` for more details
         jit=jit,
         apply_activation=apply_activation,
         leaves_as_params=leaves_as_params,
+        compatibility=compatibility,
     )
 
   def update_with_jax_params(self, params: Dict[str, Any]):
@@ -1027,6 +1081,52 @@ Use `model.describe()` for more details
       params: Learnable parameter of the model generated with `to_jax_function`.
     """
     _get_export_jax().update_with_jax_params(model=self, params=params)
+
+  def to_docker(
+      self,
+      path: str,
+      exist_ok: bool = False,
+  ) -> None:
+    """Exports the model to a Docker endpoint deployable on Cloud.
+
+    This function creates a directory containing a Dockerfile, the model and
+    support files.
+
+    Usage example:
+
+    ```python
+    import ydf
+
+    # Train a model.
+    model = ydf.RandomForestLearner(label="l").train({
+        "f1": np.random.random(size=100),
+        "f2": np.random.random(size=100),
+        "l": np.random.randint(2, size=100),
+    })
+
+    # Export the model to a Docker endpoint.
+    model.to_docker(path="/tmp/my_model")
+
+    # Print instructions on how to use the model
+    !cat /tmp/my_model/readme.md
+
+    # Test the end-point locally
+    docker build --platform linux/amd64 -t ydf_predict_image /tmp/my_model
+    docker run --rm -p 8080:8080 -d ydf_predict_image
+
+    # Deploy the model on Google Cloud
+    gcloud run deploy ydf-predict --source /tmp/my_model
+
+    # Check the automatically created utility scripts "test_locally.sh" and
+    # "deploy_in_google_cloud.sh" for more examples.
+    ```
+
+    Args:
+      path: Directory where to create the Docker endpoint
+      exist_ok: If false (default), fails if the directory already exist. If
+        true, override the directory content if any.
+    """
+    _get_export_docker().to_docker(model=self, path=path, exist_ok=exist_ok)
 
   def hyperparameter_optimizer_logs(
       self,
@@ -1298,6 +1398,15 @@ def _get_export_sklearn():
         "it installed and try again. If using pip, run `pip install"
         " scikit-learn`."
     ) from exc
+
+
+def _get_export_docker():
+  try:
+    from ydf.model import export_docker  # pylint: disable=g-import-not-at-top,import-outside-toplevel # pytype: disable=import-error
+
+    return export_docker
+  except ImportError as exc:
+    raise ValueError("Cannot import the export_docker utility") from exc
 
 
 ModelType = TypeVar("ModelType", bound=GenericModel)

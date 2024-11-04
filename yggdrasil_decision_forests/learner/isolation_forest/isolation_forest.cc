@@ -26,8 +26,10 @@
 #include <utility>
 #include <vector>
 
+#include "absl/container/btree_set.h"
 #include "absl/container/flat_hash_set.h"
 #include "absl/memory/memory.h"
+#include "absl/random/distributions.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -87,7 +89,8 @@ absl::StatusOr<internal::Configuration> BuildConfig(
   decision_tree::SetDefaultHyperParameters(
       config.if_config->mutable_decision_tree());
 
-  if (!config.if_config->decision_tree().has_max_depth()) {
+  if (!config.if_config->decision_tree().has_max_depth() ||
+      config.if_config->decision_tree().max_depth() == -2) {
     const auto num_examples_per_trees =
         GetNumExamplesPerTrees(*config.if_config, num_training_examples);
     config.if_config->mutable_decision_tree()->set_max_depth(
@@ -284,6 +287,23 @@ int DefaultMaximumDepth(UnsignedExampleIdx num_examples_per_trees) {
 std::vector<UnsignedExampleIdx> SampleExamples(
     const UnsignedExampleIdx num_examples,
     const UnsignedExampleIdx num_examples_to_sample, utils::RandomEngine* rnd) {
+  if (num_examples_to_sample < num_examples / 2) {
+    // If the number of examples is not too large, use Floyd's algorithm for
+    // sampling `num_examples_to_sample` examples from range [0, num_examples).
+    // https://doi.org/10.1145/30401.315746
+
+    absl::btree_set<UnsignedExampleIdx> sampled_examples;
+    for (UnsignedExampleIdx j = num_examples - num_examples_to_sample;
+         j < num_examples; j++) {
+      UnsignedExampleIdx t = absl::Uniform<UnsignedExampleIdx>(*rnd, 0, j + 1);
+      if (!sampled_examples.insert(t).second) {
+        sampled_examples.insert(j);
+      }
+    }
+    std::vector<UnsignedExampleIdx> examples(sampled_examples.begin(),
+                                             sampled_examples.end());
+    return {sampled_examples.begin(), sampled_examples.end()};
+  }
   std::vector<UnsignedExampleIdx> examples(num_examples);
   std::iota(examples.begin(), examples.end(), 0);
   std::shuffle(examples.begin(), examples.end(), *rnd);
@@ -357,7 +377,7 @@ IsolationForestLearner::GetGenericHyperParameterSpecification() const {
   const auto proto_path = "learner/isolation_forest/isolation_forest.proto";
 
   hparam_def.mutable_documentation()->set_description(
-      R"(An Isolation Forest (https://ieeexplore.ieee.org/abstract/document/4781136) is a collection of decision trees trained without labels and independently to partition the feature space. The Isolation Forest prediction is an anomaly score that indicates whether an example originates from a same distribution to the training examples. We refer to Isolation Forest as both the original algorithm by Liu et al. and its extensions.)");
+      R"(An [Isolation Forest](https://ieeexplore.ieee.org/abstract/document/4781136) is a collection of decision trees trained without labels and independently to partition the feature space. The Isolation Forest prediction is an anomaly score that indicates whether an example originates from a same distribution to the training examples. We refer to Isolation Forest as both the original algorithm by Liu et al. and its extensions.)");
 
   const auto& if_config =
       config.GetExtension(isolation_forest::proto::isolation_forest_config);
@@ -375,24 +395,40 @@ IsolationForestLearner::GetGenericHyperParameterSpecification() const {
     auto& param =
         hparam_def.mutable_fields()->operator[](kHParamSubsampleCount);
     param.mutable_integer()->set_minimum(0);
-    param.mutable_integer()->set_default_value(if_config.num_trees());
+    param.mutable_integer()->set_default_value(if_config.subsample_count());
+    param.mutable_mutual_exclusive()->set_is_default(true);
+    param.mutable_mutual_exclusive()->add_other_parameters(
+        kHParamSubsampleRatio);
     param.mutable_documentation()->set_proto_path(proto_path);
     param.mutable_documentation()->set_description(
-        R"(Number of examples used to grow each tree. Only one of "subsample_ratio" and "subsample_count" can be set. If neither is set, "subsample_count" is assumed to be equal to 256. This is the default value recommended in the isolation forest paper.)");
+        R"(Number of examples used to grow each tree. Only one of "subsample_ratio" and "subsample_count" can be set. By default, sample 256 examples per tree. Note that this parameter also restricts the tree's maximum depth to log2(examples used per tree) unless max_depth is set explicitly.)");
   }
 
   {
     auto& param =
         hparam_def.mutable_fields()->operator[](kHParamSubsampleRatio);
-    param.mutable_integer()->set_minimum(0);
-    param.mutable_integer()->set_default_value(if_config.num_trees());
+    param.mutable_real()->set_minimum(0);
+    param.mutable_real()->set_default_value(1.0);
+    param.mutable_mutual_exclusive()->set_is_default(false);
+    param.mutable_mutual_exclusive()->add_other_parameters(
+        kHParamSubsampleCount);
     param.mutable_documentation()->set_proto_path(proto_path);
     param.mutable_documentation()->set_description(
-        R"(Ratio of number of training examples used to grow each tree. Only one of "subsample_ratio" and "subsample_count" can be set. If neither is set, "subsample_count" is assumed to be equal to 256. This is the default value recommended in the isolation forest paper.)");
+        R"(Ratio of number of training examples used to grow each tree. Only one of "subsample_ratio" and "subsample_count" can be set. By default, sample 256 examples per tree. Note that this parameter also restricts the tree's maximum depth to log2(examples used per tree) unless max_depth is set explicitly.)");
   }
 
   RETURN_IF_ERROR(decision_tree::GetGenericHyperParameterSpecification(
       if_config.decision_tree(), &hparam_def));
+
+  {
+    auto& param =
+        hparam_def.mutable_fields()->operator[](decision_tree::kHParamMaxDepth);
+    param.mutable_integer()->set_minimum(-2);
+    param.mutable_integer()->set_default_value(-2);
+    param.mutable_documentation()->set_description(
+        R"(Maximum depth of the tree. `max_depth=1` means that all trees will be roots. `max_depth=-1` means that tree depth unconstrained by this parameter. `max_depth=-2` means that the maximum depth is log2(number of sampled examples per tree) (default).)");
+  }
+
   return hparam_def;
 }
 
@@ -441,6 +477,9 @@ IsolationForestLearner::TrainWithStatusImpl(
         const auto selected_examples = internal::SampleExamples(
             train_dataset.nrow(), model->num_examples_per_trees(),
             &local_random);
+        DCHECK(
+            std::is_sorted(selected_examples.begin(), selected_examples.end()));
+        DCHECK_EQ(selected_examples.size(), model->num_examples_per_trees());
         auto tree_or =
             GrowTree(config, train_dataset, selected_examples, &local_random);
         if (!tree_or.ok()) {

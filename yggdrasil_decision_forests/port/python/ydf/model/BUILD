@@ -82,6 +82,7 @@ pybind_library(
         "@ydf_cc//yggdrasil_decision_forests/utils:logging",
         "@ydf_cc//yggdrasil_decision_forests/utils:model_analysis",
         "@ydf_cc//yggdrasil_decision_forests/utils:model_analysis_cc_proto",
+        "@ydf_cc//yggdrasil_decision_forests/utils:status_macros",
         "@ydf_cc//yggdrasil_decision_forests/utils/benchmark:inference",
     ],
 )
@@ -215,20 +216,11 @@ py_library(
 )
 
 py_library(
-    name = "benchmark",
-    srcs = ["benchmark.py"],
+    name = "export_docker",
+    srcs = ["export_docker.py"],
     deps = [
-        ":export_jax",  # buildcleaner: keep
-        ":export_tf",  # buildcleaner: keep
         ":generic_model",
-        # jax dep,
-        # numpy dep,
-        # tensorflow:tensorflow_no_contrib dep,
-        # tensorflow_decision_forests dep,
-        # ydf dep,
-        "//ydf/dataset",
-        "//ydf/learner:specialized_learners",
-        "//ydf/utils:string_lib",
+        "//ydf/dataset:dataspec",
     ],
 )
 
@@ -392,13 +384,19 @@ py_test(
 )
 
 py_test(
-    name = "benchmark_test",
-    srcs = ["benchmark_test.py"],
+    name = "export_docker_test",
+    srcs = ["export_docker_test.py"],
+    data = ["@ydf_cc//yggdrasil_decision_forests/test_data"],
     python_version = "PY3",
     deps = [
-        ":benchmark",
+        ":export_docker",
+        ":model_lib",
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
-        # numpy dep,
+        # fastapi dep,  # buildcleaner: keep
+        # pydantic dep,  # buildcleaner: keep
+        # requests dep,  # buildcleaner: keep
+        "//ydf:api",
+        "//ydf/utils:test_utils",
     ],
 )

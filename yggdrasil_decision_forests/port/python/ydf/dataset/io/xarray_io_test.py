@@ -1,4 +1,3 @@
-#!/bin/bash
 # Copyright 2022 Google LLC.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,17 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Test dataspec utilities for XArray."""
 
-#
-# Start a notebook instance
-#
-# Usage example:
-#  # Compile PYDF
-#  third_party/yggdrasil_decision_forests/tools/run_e2e_pydf_test.sh
-#  # Start a notebook (this file)
-#  ./tools/start_notebook.sh
-#  # Open your browser to http://localhost:8888/
+from absl.testing import absltest
+import xarray as xr
 
-pip install notebook -U
-python tools/assembly_pip_files.py
-( cd tmp_package && jupyter-lab --no-browser --allow-root --port 8889 )
+from ydf.dataset.io import xarray_io
+
+
+class XArrayIOTest(absltest.TestCase):
+
+  def test_is_pandas(self):
+    self.assertTrue(xarray_io.is_xarray_dataset(xr.Dataset()))
+    self.assertFalse(xarray_io.is_xarray_dataset({}))
+
+
+if __name__ == "__main__":
+  absltest.main()
