@@ -38,6 +38,7 @@ pybind_library(
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_cc_proto",
         "@ydf_cc//yggdrasil_decision_forests/dataset:types",
         "@ydf_cc//yggdrasil_decision_forests/dataset:vertical_dataset",
+        "@ydf_cc//yggdrasil_decision_forests/dataset:weight",
         "@ydf_cc//yggdrasil_decision_forests/metric:metric_cc_proto",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model",
         "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_cc_proto",
@@ -130,12 +131,13 @@ py_library(
     srcs = ["export_jax.py"],
     deps = [
         ":generic_model",
+        # numpy dep,
+        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "//ydf/dataset:dataspec",
         "//ydf/learner:custom_loss_py",
         "//ydf/model/decision_forest_model",
         "//ydf/model/gradient_boosted_trees_model",
         "//ydf/model/tree:all",
-        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
     ],
 )
 
@@ -347,6 +349,7 @@ py_test(
 
 py_test(
     name = "jax_model_test",
+    timeout = "long",
     srcs = ["jax_model_test.py"],
     data = [
         "//test_data",

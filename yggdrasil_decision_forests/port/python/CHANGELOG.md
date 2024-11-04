@@ -1,13 +1,53 @@
 # Changelog
 
-## HEAD
+## Head
 
 ### Feature
 
+-   Add support in JAX FeatureEncoder for non-string categorical feature values.
+
+### Fix
+
+-   Fix parsing of multidimensional ragged inputs.
+
+## 0.6.0 - 2024-07-04
+
+### Feature
+
+-   `model.to_jax_function` now always outputs a FeatureEncoder to help feeding
+    data to the JAX model.
+-   The default value of `num_candidate_attributes` in the CART learner is
+    changed from 0 (Random Forest style sampling) to -1 (no sampling). This is
+    the generally accepted logic of CART.
+-   `model.to_tensorflow_saved_model` support preprocessing functions which have
+    a different signature than the YDF model.
+-   Improve error messages when feeding wrong size Numpy arrays.
+-   Add option for weighted evaluation in `model.evaluate`.
+
+### Fix
+
+-   Fix display of confusion matrix with floating point weights.
+
+### Known issues
+
+-   MacOS build is broken.
+
+## 0.5.0 - 2024-06-17
+
+### Feature
+
+-   Add support for Isolation Forests model.
 -   Add `max_depth` argument to `model.print_tree`.
 -   Add `verbose` argument to `train` method which is equivalent but sometime
     more convenient than`ydf.verbose`.
 -   Add SKLearn to YDF model converter: `ydf.from_sklearn`.
+-   Improve error messages when calling the model with non supported data.
+-   Add support for numpy 2.0.
+
+### Tutorials
+
+-   Add anomaly detection tutorial.
+-   Add YDF and JAX model composition tutorial.
 
 ### Fix
 

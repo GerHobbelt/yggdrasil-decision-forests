@@ -48,7 +48,6 @@ class GenericDatasetTest(parameterized.TestCase):
       (np.array([1], np.float64), Semantic.NUMERICAL),
       (np.array([1], np.bool_), Semantic.BOOLEAN),
       (np.array(["a"], np.bytes_), Semantic.CATEGORICAL),
-      (np.array(["a"], np.string_), Semantic.CATEGORICAL),
       (np.array(["a", np.nan], np.object_), Semantic.CATEGORICAL),
   )
   def test_infer_semantic(self, value, expected_semantic):
@@ -941,6 +940,36 @@ B,3""")
     )
     test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
 
+  def test_multidimensional_ragged_input(self):
+    ds = dataset.create_vertical_dataset(
+        {
+            "feature": np.array(
+                [np.asarray([0, 1]), np.asarray([0, 1, 2, 3])], dtype=object
+            )
+        },
+        min_vocab_frequency=2,
+    )
+    expected_data_spec = ds_pb.DataSpecification(
+        created_num_rows=2,
+        columns=(
+            ds_pb.Column(
+                name="feature",
+                type=ds_pb.ColumnType.CATEGORICAL_SET,
+                dtype=ds_pb.DType.DTYPE_BYTES,
+                count_nas=0,
+                categorical=ds_pb.CategoricalSpec(
+                    items={
+                        "<OOD>": VocabValue(index=0, count=2),
+                        "0": VocabValue(index=1, count=2),
+                        "1": VocabValue(index=2, count=2),
+                    },
+                    number_of_unique_values=3,
+                ),
+            ),
+        ),
+    )
+    test_utils.assertProto2Equal(self, ds.data_spec(), expected_data_spec)
+
   @parameterized.parameters(
       (1, "feature.0_of_1"),
       (9, "feature.0_of_9"),
@@ -1171,6 +1200,18 @@ feature.0_of_3,feature.1_of_3,feature.2_of_3
   @parameterized.parameters("", "a", "hello")
   def test_does_not_look_numerical(self, value: str):
     self.assertFalse(dataset.look_numerical(value))
+
+  def test_from_numpy(self):
+    with self.assertRaisesRegex(
+        ValueError, "YDF does not consume Numpy arrays directly"
+    ):
+      dataset.create_vertical_dataset(np.array([1, 2, 3]))
+
+  def test_from_column_less_pandas(self):
+    with self.assertRaisesRegex(
+        ValueError, "The pandas DataFrame must have string column names"
+    ):
+      dataset.create_vertical_dataset(pd.DataFrame([[1, 2, 3], [4, 5, 6]]))
 
 
 class CategoricalSetTest(absltest.TestCase):

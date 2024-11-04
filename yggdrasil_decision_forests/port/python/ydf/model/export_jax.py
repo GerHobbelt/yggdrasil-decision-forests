@@ -20,6 +20,8 @@ import enum
 import functools
 from typing import Any, Sequence, Dict, Optional, List, Set, Tuple, Callable, Union, MutableSequence
 
+import numpy as np
+
 from yggdrasil_decision_forests.dataset import data_spec_pb2 as ds_pb
 from ydf.dataset import dataspec as dataspec_lib
 from ydf.learner import custom_loss
@@ -98,7 +100,9 @@ class FeatureEncoder:
   """Utility to prepare feature values before being fed into the Jax model.
 
   Does the following:
-  - Encodes categorical strings into categorical integers.
+  - Encodes categorical values into categorical integers.
+  - If the model does not need special feature encoding, it only converts the
+    values into the expected format (e.g. numpy arrays into Jax arrays).
 
   Attributes:
     categorical: Mapping between categorical-string feature to the dictionary of
@@ -115,17 +119,15 @@ class FeatureEncoder:
       cls,
       input_features: Sequence[generic_model.InputFeature],
       dataspec: ds_pb.DataSpecification,
-  ) -> Optional["FeatureEncoder"]:
+  ) -> "FeatureEncoder":
     """Creates a FeatureEncoder object.
-
-    If the input feature does not require feature encoding, returns None.
 
     Args:
       input_features: All the input features of a model.
       dataspec: Dataspec of the model.
 
     Returns:
-      A FeatureEncoder or None.
+      A FeatureEncoder.
     """
 
     categorical = {}
@@ -143,8 +145,6 @@ class FeatureEncoder:
             key: item.index
             for key, item in column_spec.categorical.items.items()
         }
-    if not categorical:
-      return None
     return FeatureEncoder(categorical=categorical)
 
   def __call__(self, feature_values: Dict[str, Any]) -> Dict[str, jax.Array]:
@@ -152,19 +152,53 @@ class FeatureEncoder:
     return self.encode(feature_values)
 
   def encode(self, feature_values: Dict[str, Any]) -> Dict[str, jax.Array]:
-    """Encodes feature values for a model."""
+    """Encodes feature values into the format expected by the Jax model.
 
-    def encode_item(key: str, value: Any) -> jax.Array:
-      categorical_map = self.categorical.get(key)
+    Args:
+      feature_values: Dictionary of feature name to batch of feature values. The
+        feature names must match the unrolled feature names of the vertical
+        dataset.
+
+    Returns:
+      Dictionary of feature name to feature values in the format expected by the
+      Jax model.
+    """
+
+    def encode_feature(name: str, values: Any) -> jax.Array:
+      """Encodes the values of a feature."""
+      categorical_map = self.categorical.get(name)
+
       if categorical_map is not None:
-        # Categorical string encoding.
-        value = [
-            categorical_map.get(x, self.categorical_out_of_vocab_item)
-            for x in value
-        ]
-      return jax.numpy.asarray(value)
 
-    return {k: encode_item(k, v) for k, v in feature_values.items()}
+        def to_key(value: Any) -> str:
+          """Converts a feature value to the format of a categorical map key."""
+          if isinstance(value, str):
+            return value
+          if isinstance(value, (bytes, np.bytes_)):
+            return value.decode("utf-8")
+          if isinstance(value, (bool, np.bool_)):
+            return str(value).lower()
+          if isinstance(value, (int, np.integer)):
+            return str(value)
+          # The YDF to Jax exporter does not support categorical sets, hence the
+          # value cannot be a list or a numpy array.
+          raise ValueError(
+              f"Unexpected categorical value type for feature {name!r}."
+              " Categorical features can be strings, bytes literals, integers,"
+              f" or booleans. Got {type(value)}."
+          )
+
+        values = [
+            categorical_map.get(to_key(v), self.categorical_out_of_vocab_item)
+            for v in values
+        ]
+
+      return jax.numpy.asarray(values)
+
+    return {
+        name: encode_feature(name, values)
+        for name, values in feature_values.items()
+    }
 
 
 @dataclasses.dataclass
@@ -175,15 +209,16 @@ class JaxModel:
     predict: Jitted JAX function that computes the model predictions. The
       signature is `predict(feature_values)` if `params` is None, and
       `predict(feature_values, params)` if `params` is set.
-    encoder: Optional object to encode features before the JAX model. Is None if
-      the model does not need special feature encoding. For instance, used to
-      encode categorical string values.
+    encoder: Utility object that encodes the features into a format compatible
+      with the JAX model. It converts compatible objects such as numpy arrays
+      into JAX arrays. If the examples contain categorical string values, it
+      replaces these with integers that the JAX model can handle.
     params: Learnable parameters of the model. If set, "params" should be passed
       as an argument to the "predict" function.
   """
 
   predict: Union[Callable[[Any], Any], Callable[[Any, Dict[str, Any]], Any]]
-  encoder: Optional[FeatureEncoder]
+  encoder: FeatureEncoder
   params: Optional[Dict[str, Any]]
 
 
@@ -456,7 +491,7 @@ class InternalForest:
 
   model: dataclasses.InitVar[generic_model.GenericModel]
   feature_spec: InternalFeatureSpec = dataclasses.field(init=False)
-  feature_encoder: Optional[FeatureEncoder] = dataclasses.field(init=False)
+  feature_encoder: FeatureEncoder = dataclasses.field(init=False)
   dataspec: ds_pb.DataSpecification = dataclasses.field(repr=False, init=False)
   leaf_outputs: ArrayFloat = dataclasses.field(
       default_factory=lambda: array.array("f", [])

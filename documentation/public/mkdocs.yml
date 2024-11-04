@@ -56,6 +56,7 @@ nav:
     - Regression: tutorial/regression.ipynb
     - Ranking: tutorial/ranking.ipynb
     - Uplifting: tutorial/uplifting.ipynb
+    - Anomaly detection: tutorial/anomaly_detection.ipynb
   - Input feature:
     - numerical: tutorial/numerical_feature.ipynb
     - categorical: tutorial/categorical_feature.ipynb
@@ -77,7 +78,7 @@ nav:
   - Evaluation:
     - Train & test: tutorial/train_and_test.ipynb
     - Cross-validation: tutorial/cross_validation.ipynb
-  - Interpretation:
+  - Explainability:
     - Counterfactual: tutorial/counterfactual.ipynb
     - Model understanding: tutorial/model_understanding.ipynb
     - Prediction understanding: tutorial/prediction_understanding.ipynb

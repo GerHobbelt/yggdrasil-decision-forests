@@ -623,6 +623,60 @@ class RandomForestLearnerTest(LearnerTest):
     ):
       _ = learner.train(ds)
 
+  def test_weighted_training_and_evaluation(self):
+
+    def gen_ds(seed, n=10000):
+      np.random.seed(seed)
+      f1 = np.random.uniform(size=n)
+      f2 = np.random.uniform(size=n)
+      f3 = np.random.uniform(size=n)
+      weights = np.random.uniform(size=n)
+      return {
+          "f1": f1,
+          "f2": f2,
+          "f3": f3,
+          "label": (
+              # Make the examples with high weights harder to predict.
+              f1 + f2 * 0.5 + f3 * 0.5 + np.random.uniform(size=n) * weights
+              >= 1.5
+          ),
+          "weights": weights,
+      }
+
+    model = specialized_learners.RandomForestLearner(
+        label="label",
+        weights="weights",
+        num_trees=300,
+        winner_take_all=False,
+    ).train(gen_ds(0))
+
+    test_ds = gen_ds(1)
+
+    self_evaluation = model.self_evaluation()
+    non_weighted_evaluation = model.evaluate(test_ds, weighted=False)
+    weighted_evaluation = model.evaluate(test_ds, weighted=True)
+
+    self.assertIsNotNone(self_evaluation)
+    self.assertAlmostEqual(self_evaluation.accuracy, 0.824501, delta=0.005)
+    self.assertAlmostEqual(
+        non_weighted_evaluation.accuracy, 0.8417, delta=0.005
+    )
+    self.assertAlmostEqual(weighted_evaluation.accuracy, 0.8172290, delta=0.005)
+    predictions = model.predict(test_ds)
+
+    manual_non_weighted_evaluation = np.mean(
+        (predictions >= 0.5) == test_ds["label"]
+    )
+    manual_weighted_evaluation = np.sum(
+        ((predictions >= 0.5) == test_ds["label"]) * test_ds["weights"]
+    ) / np.sum(test_ds["weights"])
+    self.assertAlmostEqual(
+        manual_non_weighted_evaluation, non_weighted_evaluation.accuracy
+    )
+    self.assertAlmostEqual(
+        manual_weighted_evaluation, weighted_evaluation.accuracy
+    )
+
   def test_learn_and_predict_when_label_is_not_last_column(self):
     label = "age"
     learner = specialized_learners.RandomForestLearner(
@@ -675,6 +729,67 @@ class RandomForestLearnerTest(LearnerTest):
         label="label", num_trees=4
     )
     _ = learner.train(ds)
+
+  def test_label_is_dataset(self):
+    with self.assertRaisesRegex(ValueError, "should be a string"):
+      _ = specialized_learners.RandomForestLearner(label=np.array([1, 0]))  # pytype: disable=wrong-arg-types
+
+  def test_wrong_shape_multidim_model(self):
+    model = specialized_learners.RandomForestLearner(
+        label="label", num_trees=5
+    ).train({
+        "feature": np.array([[0, 1], [3, 4]]),
+        "label": np.array([0, 1]),
+    })
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Column 'feature' is expected to be multi-dimensional with shape 2 but"
+        r" it is single-dimensional. If you use Numpy arrays, the column is"
+        r" expected to be an array of shape \[num_examples, 2\].",
+    ):
+      _ = model.predict({
+          "feature": np.array([0, 1]),
+      })
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Unexpected shape for multi-dimensional column 'feature'. Column has"
+        r" shape 1 but is expected to have shape 2.",
+    ):
+      _ = model.predict({
+          "feature": np.array([[0], [1]]),
+      })
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Unexpected shape for multi-dimensional column 'feature'. Column has"
+        r" shape 3 but is expected to have shape 2.",
+    ):
+      _ = model.predict({
+          "feature": np.array([[0, 1, 2], [3, 4, 5]]),
+      })
+
+  def test_wrong_shape_singledim_model(self):
+    model = specialized_learners.RandomForestLearner(
+        label="label", num_trees=5
+    ).train({
+        "feature": np.array([0, 1]),
+        "label": np.array([0, 1]),
+    })
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Column 'feature' is expected to single-dimensional but it is"
+        r" multi-dimensional with shape 2.",
+    ):
+      _ = model.predict({
+          "feature": np.array([[0, 1]]),
+      })
+    with self.assertRaisesRegex(
+        ValueError,
+        r"Column 'feature' is expected to single-dimensional but it is"
+        r" multi-dimensional with shape 1.",
+    ):
+      _ = model.predict({
+          "feature": np.array([[0], [1]]),
+      })
 
 
 class CARTLearnerTest(LearnerTest):
