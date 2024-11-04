@@ -5,16 +5,30 @@
 ### Breaking
 
 -   Disallow positional parameters for the learners, except for label and task.
+-   Remove the unsupported / invalid hyperparameters from the Isolation Forest
+    learner.
+-   Remove parameters for distributed training and resuming training from
+    learners that do not support these capabilities.
 
 ### Feature
 
 -   Warn if training on a VerticalDataset and fail if attempting to modify the
     columns in a VerticalDataset during training.
 -   User can override the model's task, label or group during evaluation.
+-   Add `num_examples_per_tree()` method to Isolation Forest models.
+-   Expose the slow engine for debugging predictions and evaluations with
+    `use_slow_engine=True`.
+-   Speed-up training of GBT models by ~10%
+-   Add `ydf.util.read_tf_record` and `ydf.util.write_tf_record` to facilitate
+    TF Record datasets usage.
+-   Enable multi-threading when using `model.predict` and `model.evaluate`.
+-   Default number of threads of `model.analyze` is equal to the number of
+    cores.
+-   Add multi-threaded results in `model.benchmark`.
 
 ### Fix
 
--   Remove the unsupported / invalid hyperparameters from isolation forests.
+-   Fix labels of regression evaluation plots
 
 ## 0.7.0 - 2024-08-21
 
@@ -36,6 +50,8 @@
 -   Various improvements of error messages.
 -   Evaluation for Anomaly Detection models.
 -   Oblique splits for Anomaly Detection models.
+-   Reduce significatively the RAM usage of distributed training with
+    discretized numerical values.
 
 ### Fix
 
@@ -50,6 +66,7 @@
     inputs.
 -   MacOS: Fix compatibility with other protobuf-using libraries such as
     Tensorflow.
+-   Fix parsing of NAs in Xarray datasets.
 
 #### Release music
 

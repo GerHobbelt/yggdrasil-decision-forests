@@ -34,6 +34,7 @@ from ydf.model import analysis
 from ydf.model import model_metadata
 from ydf.model import optimizer_logs
 from ydf.model import template_cpp_export
+from ydf.utils import concurrency
 from ydf.utils import html
 from ydf.utils import log
 from yggdrasil_decision_forests.utils import model_analysis_pb2
@@ -241,6 +242,7 @@ Use `model.describe()` for more details
       benchmark_duration: float = 3,
       warmup_duration: float = 1,
       batch_size: int = 100,
+      num_threads: Optional[int] = None,
   ) -> ydf.BenchmarkInferenceCCResult:
     """Benchmark the inference speed of the model on the given dataset.
 
@@ -261,10 +263,16 @@ Use `model.describe()` for more details
        batch_size: Size of batches when feeding examples to the inference
          engines. The impact of this parameter on the results depends on the
          architecture running the benchmark (notably, cache sizes).
+       num_threads: Number of threads used for the multi-threaded benchmark. If
+         not specified, the number of threads is set to the number of cpu cores.
 
     Returns:
       Benchmark results.
     """
+
+    if num_threads is None:
+      num_threads = concurrency.determine_optimal_num_threads(training=False)
+
     if benchmark_duration <= 0:
       raise ValueError(
           "The duration of the benchmark must be positive, got"
@@ -287,7 +295,11 @@ Use `model.describe()` for more details
           required_columns=self.input_feature_names(),
       )
       result = self._model.Benchmark(
-          vds._dataset, benchmark_duration, warmup_duration, batch_size  # pylint: disable=protected-access
+          vds._dataset,
+          benchmark_duration,
+          warmup_duration,
+          batch_size,
+          num_threads,  # pylint: disable=protected-access
       )
     return result
 
@@ -379,7 +391,13 @@ Use `model.describe()` for more details
     with log.cc_log_context():
       return self._model.Serialize()
 
-  def predict(self, data: dataset.InputDataset) -> np.ndarray:
+  def predict(
+      self,
+      data: dataset.InputDataset,
+      *,
+      use_slow_engine=False,
+      num_threads: Optional[int] = None,
+  ) -> np.ndarray:
     """Returns the predictions of the model on the given dataset.
 
     Usage example:
@@ -400,7 +418,18 @@ Use `model.describe()` for more details
       data: Dataset. Can be a dictionary of list or numpy array of values,
         Pandas DataFrame, or a VerticalDataset. If the dataset contains the
         label column, that column is ignored.
+      use_slow_engine: If true, uses the slow engine for making predictions. The
+        slow engine of YDF is an order of magnitude slower than the other
+        prediction engines. There exist very rare edge cases where predictions
+        with the regular engines fail, e.g., models with a very large number of
+        categorical conditions. It is only in these cases, that users should use
+        the slow engine and report the issue to the YDF developers.
+      num_threads: Number of threads used to run the model.
     """
+
+    if num_threads is None:
+      num_threads = concurrency.determine_optimal_num_threads(training=False)
+
     with log.cc_log_context():
       # The data spec contains the label / weights /  ranking group / uplift
       # treatment column, but those are not required for making predictions.
@@ -409,7 +438,9 @@ Use `model.describe()` for more details
           data_spec=self._model.data_spec(),
           required_columns=self.input_feature_names(),
       )
-      result = self._model.Predict(ds._dataset)  # pylint: disable=protected-access
+      result = self._model.Predict(
+          ds._dataset, use_slow_engine, num_threads=num_threads
+      )  # pylint: disable=protected-access
     return result
 
   def evaluate(
@@ -422,6 +453,8 @@ Use `model.describe()` for more details
       group: Optional[str] = None,
       bootstrapping: Union[bool, int] = False,
       evaluation_task: Optional[Task] = None,
+      use_slow_engine: bool = False,
+      num_threads: Optional[int] = None,
   ) -> metric.Evaluation:
     """Evaluates the quality of a model on a dataset.
 
@@ -487,10 +520,20 @@ Use `model.describe()` for more details
         In this case, if the number is less than 100, an error is raised as
         bootstrapping will not yield useful results.
       evaluation_task: Deprecated. Use `task` instead.
+      use_slow_engine: If true, uses the slow engine for making predictions. The
+        slow engine of YDF is an order of magnitude slower than the other
+        prediction engines. There exist very rare edge cases where predictions
+        with the regular engines fail, e.g., models with a very large number of
+        categorical conditions. It is only in these cases, that users should use
+        the slow engine and report the issue to the YDF developers.
+      num_threads: Number of threads used to run the model.
 
     Returns:
       Model evaluation.
     """
+
+    if num_threads is None:
+      num_threads = concurrency.determine_optimal_num_threads(training=False)
 
     # Warning about deprecation of "evaluation_task"
     if evaluation_task is not None:
@@ -556,6 +599,7 @@ Use `model.describe()` for more details
       options_proto = metric_pb2.EvaluationOptions(
           bootstrapping_samples=bootstrapping_samples,
           task=task._to_proto_type(),  # pylint: disable=protected-access
+          num_threads=num_threads,
       )
 
       evaluation_proto = self._model.Evaluate(
@@ -564,6 +608,8 @@ Use `model.describe()` for more details
           weighted=weighted,
           label_col_idx=label_col_idx,
           group_col_idx=group_col_idx,
+          use_slow_engine=use_slow_engine,
+          num_threads=num_threads,
       )  # pylint: disable=protected-access
     return metric.Evaluation(evaluation_proto)
 
@@ -621,7 +667,7 @@ Use `model.describe()` for more details
       partial_depepence_plot: bool = True,
       conditional_expectation_plot: bool = True,
       permutation_variable_importance_rounds: int = 1,
-      num_threads: int = 6,
+      num_threads: Optional[int] = None,
   ) -> analysis.Analysis:
     """Analyzes a model on a test dataset.
 
@@ -675,6 +721,9 @@ Use `model.describe()` for more details
     Returns:
       Model analysis.
     """
+
+    if num_threads is None:
+      num_threads = concurrency.determine_optimal_num_threads(training=False)
 
     with log.cc_log_context():
       ds = dataset.create_vertical_dataset(

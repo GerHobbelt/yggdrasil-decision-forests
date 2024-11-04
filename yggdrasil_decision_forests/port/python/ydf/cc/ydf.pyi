@@ -104,22 +104,28 @@ class BenchmarkInferenceCCResult:
   """
 
   duration_per_example: float
+  duration_per_example_multithread: float
   benchmark_duration: float
   num_runs: int
   batch_size: int
+  num_threads: int
 
 class GenericCCModel:
   def Predict(
       self,
       dataset: VerticalDataset,
+      use_slow_engine: bool,
+      num_threads: int,
   ) -> npt.NDArray[np.float32]: ...
   def Evaluate(
       self,
       dataset: VerticalDataset,
       options: metric_pb2.EvaluationOptions,
       weighted: bool,
-      label_col_idx:int,
-      group_col_idx:int,
+      label_col_idx: int,
+      group_col_idx: int,
+      use_slow_engine: bool,
+      num_threads: int,
   ) -> metric_pb2.EvaluationResults: ...
   def Analyze(
       self,
@@ -154,6 +160,7 @@ class GenericCCModel:
       benchmark_duration: float,
       warmup_duration: float,
       batch_size: int,
+      num_threads: int,
   ) -> BenchmarkInferenceCCResult: ...
   def VariableImportances(
       self,
@@ -162,7 +169,6 @@ class GenericCCModel:
   def ListCompatibleEngines(self) -> Sequence[str]: ...
   # TODO: Remove when solved.
   def weighted_training(self) -> bool: ...
-
 
 class DecisionForestCCModel(GenericCCModel):
   def num_trees(self) -> int: ...
@@ -205,6 +211,7 @@ class RandomForestCCModel(DecisionForestCCModel):
 class IsolationForestCCModel(DecisionForestCCModel):
   @property
   def kRegisteredName(self): ...
+  def num_examples_per_tree(self) -> int: ...
 
 class GradientBoostedTreesCCModel(DecisionForestCCModel):
   @property

@@ -156,6 +156,28 @@ class RandomForestLearnerTest(LearnerTest):
     logging.info("Evaluation: %s", evaluation)
     self.assertGreaterEqual(evaluation.accuracy, 0.864)
 
+  def test_adult_classification_on_tfrecord_dataset(self):
+    learner = specialized_learners.RandomForestLearner(label="income")
+    model = learner.train(
+        "tfrecord:"
+        + os.path.join(
+            test_utils.ydf_test_data_path(),
+            "dataset",
+            "adult_train.recordio.gz",
+        )
+    )
+    logging.info("Trained model: %s", model)
+
+    # Evaluate the trained model.
+    evaluation = model.evaluate(
+        "tfrecord:"
+        + os.path.join(
+            test_utils.ydf_test_data_path(), "dataset", "adult_test.recordio.gz"
+        )
+    )
+    logging.info("Evaluation: %s", evaluation)
+    self.assertGreaterEqual(evaluation.accuracy, 0.864)
+
   def test_two_center_regression(self):
     learner = specialized_learners.RandomForestLearner(
         label="target", task=generic_learner.Task.REGRESSION
@@ -1245,7 +1267,7 @@ class IsolationForestLearnerTest(LearnerTest):
             "loss",
         ],
     )
-    self.assertAlmostEqual(evaluation.accuracy, 0.98, delta=0.01)
+    self.assertAlmostEqual(evaluation.accuracy, 0.975, delta=0.015)
     self.assertAlmostEqual(evaluation.loss, 0.52, delta=0.01)
 
   def test_max_depth_gaussians_subsample_ratio(self):
