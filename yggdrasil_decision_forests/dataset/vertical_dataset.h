@@ -43,7 +43,6 @@
 #include "yggdrasil_decision_forests/dataset/types.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
-
 namespace yggdrasil_decision_forests {
 namespace dataset {
 
@@ -113,11 +112,11 @@ class VerticalDataset {
 
     // Extract a subset of rows.  The "dst" columns
     // should have the same type as "this".
-    virtual absl::Status ExtractAndAppend(const std::vector<row_t>& indices,
+    virtual absl::Status ExtractAndAppend(absl::Span<const row_t> indices,
                                           AbstractColumn* dst) const = 0;
 
     virtual absl::Status ExtractAndAppend(
-        const std::vector<UnsignedExampleIdx>& indices,
+        absl::Span<const UnsignedExampleIdx> indices,
         AbstractColumn* dst) const = 0;
 
     // Converts the content of a column to another dataspec.
@@ -182,12 +181,11 @@ class VerticalDataset {
     const std::vector<T>& values() const { return values_; }
     std::vector<T>* mutable_values() { return &values_; }
 
-    absl::Status ExtractAndAppend(const std::vector<row_t>& indices,
+    absl::Status ExtractAndAppend(absl::Span<const row_t> indices,
                                   AbstractColumn* dst) const override;
 
-    absl::Status ExtractAndAppend(
-        const std::vector<UnsignedExampleIdx>& indices,
-        AbstractColumn* dst) const override;
+    absl::Status ExtractAndAppend(absl::Span<const UnsignedExampleIdx> indices,
+                                  AbstractColumn* dst) const override;
 
     std::pair<uint64_t, uint64_t> memory_usage() const override {
       return std::pair<uint64_t, uint64_t>(values_.size() * sizeof(T),
@@ -248,12 +246,11 @@ class VerticalDataset {
       Add(values.begin(), values.end());
     }
 
-    absl::Status ExtractAndAppend(const std::vector<row_t>& indices,
+    absl::Status ExtractAndAppend(absl::Span<const row_t> indices,
                                   AbstractColumn* dst) const override;
 
-    absl::Status ExtractAndAppend(
-        const std::vector<UnsignedExampleIdx>& indices,
-        AbstractColumn* dst) const override;
+    absl::Status ExtractAndAppend(absl::Span<const UnsignedExampleIdx> indices,
+                                  AbstractColumn* dst) const override;
 
     const std::vector<std::pair<size_t, size_t>>& values() const {
       return values_;
@@ -649,12 +646,15 @@ class VerticalDataset {
 
     // Number of vectors in the sequence.
     uint32_t SequenceLength(row_t row) const {
-      const auto& item = items_[row];
-      if (item.size == -1) {
+      DCHECK_GE(row, 0);
+      DCHECK_LT(row, nrows());
+
+      const auto& size = item_sizes_[row];
+      if (size == -1) {
         DCHECK(false);  // Trying to get a missing value.
         return 0;
       }
-      return item.size;
+      return size;
     }
 
     // Gets a view to a vector. "sequence_idx" should be in [0, SequenceLength).
@@ -666,13 +666,14 @@ class VerticalDataset {
       DCHECK_GE(sequence_idx, 0);
       DCHECK_LT(sequence_idx, SequenceLength(row));
 
-      const auto& item = items_[row];
-      if (item.size == -1) {
+      const auto size = item_sizes_[row];
+      if (size == -1) {
         return absl::InvalidArgumentError(
             "Trying to get a vector from a missing vector sequence.");
       }
       return absl::Span<const float>(
-          &values_[item.begin + sequence_idx * vector_length_], vector_length_);
+          &bank_[item_begins_[row] + sequence_idx * vector_length_],
+          vector_length_);
     };
 
     void Add(absl::Span<const float> values);
@@ -700,17 +701,16 @@ class VerticalDataset {
                         proto::Example::Attribute* attribute) const override;
 
     template <typename T>
-    absl::Status ExtractAndAppendTemplate(const std::vector<T>& indices,
+    absl::Status ExtractAndAppendTemplate(absl::Span<const T> indices,
                                           AbstractColumn* dst) const;
 
-    absl::Status ExtractAndAppend(const std::vector<row_t>& indices,
+    absl::Status ExtractAndAppend(absl::Span<const row_t> indices,
                                   AbstractColumn* dst) const override {
       return ExtractAndAppendTemplate(indices, dst);
     }
 
-    absl::Status ExtractAndAppend(
-        const std::vector<UnsignedExampleIdx>& indices,
-        AbstractColumn* dst) const override {
+    absl::Status ExtractAndAppend(absl::Span<const UnsignedExampleIdx> indices,
+                                  AbstractColumn* dst) const override {
       return ExtractAndAppendTemplate(indices, dst);
     }
 
@@ -722,22 +722,22 @@ class VerticalDataset {
 
     void ShrinkToFit() override;
 
+    const std::vector<float>& bank() const { return bank_; }
+    const std::vector<size_t>& item_begins() const { return item_begins_; }
+    const std::vector<int32_t>& item_sizes() const { return item_sizes_; }
+    int vector_length() const { return vector_length_; }
+
    private:
     // The values of examples i are:
-    //   T_i = values_[items_[i].begin ... items_[i].begin + items_[i].size *
+    //   T_i = bank_[items_begins[i] ... items_begin[i] + items_size[i] *
     //   vector_length_]
     // The d-th dimension of the s-th sequence of example i is:
     //   T_i[s * vector_length_ + d]
-    struct PerExample {
-      size_t begin;
-      int32_t size;  // Size of -1 indicates NA.
 
-      // Constructor required for C++17 compatibility.
-      PerExample(size_t begin, int32_t size) : begin(begin), size(size) {}
-    };
     const int vector_length_;
-    std::vector<float> values_;      // Vector of size num_rows
-    std::vector<PerExample> items_;  // Vector of size num_rows
+    std::vector<float> bank_;          // Vector of size num_rows
+    std::vector<size_t> item_begins_;  // Vector of size num_rows
+    std::vector<int32_t> item_sizes_;  // Vector of size num_rows
   };
 
   VerticalDataset() {}
@@ -846,18 +846,27 @@ class VerticalDataset {
   absl::Status Append(const VerticalDataset& src);
   // Add a subset of "src" at the end of this dataset.
   absl::Status Append(const VerticalDataset& src,
-                      const std::vector<row_t>& indices);
+                      absl::Span<const row_t> indices);
 
   // Create the columns of the dataset from the columns specified in the
   // dataspec. This functions should be used if the dataspec was created
   // directly (i.e. using mutable_data_spec), instead of using "AddColumn".
   absl::Status CreateColumnsFromDataspec();
 
-  // Add and initialize a new column to the dataspec.
+  // Add and initialize a new column from a column dataspec. Returns the
+  // column data.
   absl::StatusOr<AbstractColumn*> AddColumn(const proto::Column& column_spec);
 
-  absl::StatusOr<proto::Column*> AddColumn(const absl::string_view name,
-                                           const proto::ColumnType type);
+  // Add and initialize a new column from a name and type. Returns the
+  // column dataspec.
+  absl::StatusOr<proto::Column*> AddColumn(absl::string_view name,
+                                           proto::ColumnType type);
+
+  // Add and initialize a new column from a column spec. Returns a non-owning
+  // pointer to the column data and column spec. For new code, prefer
+  // "AddColumnV2" over "AddColumn".
+  absl::StatusOr<std::pair<proto::Column*, AbstractColumn*>> AddColumnV2(
+      const proto::Column& column_spec);
 
   // Similar to "AddColumn", but replace an existing column.
   absl::StatusOr<AbstractColumn*> ReplaceColumn(
@@ -984,7 +993,7 @@ bool IsValidSubDataspec(const proto::DataSpecification& a,
 
 template <typename T>
 absl::Status VerticalDataset::TemplateScalarStorage<T>::ExtractAndAppend(
-    const std::vector<row_t>& indices, AbstractColumn* dst) const {
+    absl::Span<const row_t> indices, AbstractColumn* dst) const {
   auto* cast_dst =
       dynamic_cast<VerticalDataset::TemplateScalarStorage<T>*>(dst);
   STATUS_CHECK(cast_dst != nullptr);
@@ -1011,7 +1020,7 @@ absl::Status VerticalDataset::TemplateScalarStorage<T>::ExtractAndAppend(
 
 template <typename T>
 absl::Status VerticalDataset::TemplateScalarStorage<T>::ExtractAndAppend(
-    const std::vector<UnsignedExampleIdx>& indices, AbstractColumn* dst) const {
+    absl::Span<const UnsignedExampleIdx> indices, AbstractColumn* dst) const {
   auto* cast_dst =
       dynamic_cast<VerticalDataset::TemplateScalarStorage<T>*>(dst);
   STATUS_CHECK(cast_dst != nullptr);
@@ -1038,7 +1047,7 @@ absl::Status VerticalDataset::TemplateScalarStorage<T>::ExtractAndAppend(
 
 template <typename T>
 absl::Status VerticalDataset::TemplateMultiValueStorage<T>::ExtractAndAppend(
-    const std::vector<row_t>& indices, AbstractColumn* dst) const {
+    absl::Span<const row_t> indices, AbstractColumn* dst) const {
   auto* cast_dst =
       dynamic_cast<VerticalDataset::TemplateMultiValueStorage<T>*>(dst);
   STATUS_CHECK(cast_dst != nullptr);
@@ -1060,7 +1069,7 @@ absl::Status VerticalDataset::TemplateMultiValueStorage<T>::ExtractAndAppend(
 
 template <typename T>
 absl::Status VerticalDataset::TemplateMultiValueStorage<T>::ExtractAndAppend(
-    const std::vector<UnsignedExampleIdx>& indices, AbstractColumn* dst) const {
+    absl::Span<const UnsignedExampleIdx> indices, AbstractColumn* dst) const {
   auto* cast_dst =
       dynamic_cast<VerticalDataset::TemplateMultiValueStorage<T>*>(dst);
   STATUS_CHECK(cast_dst != nullptr);
@@ -1166,7 +1175,7 @@ absl::StatusOr<VerticalDataset> VerticalDataset::Extract(
 template <typename T>
 absl::Status
 VerticalDataset::NumericalVectorSequenceColumn::ExtractAndAppendTemplate(
-    const std::vector<T>& indices, AbstractColumn* dst) const {
+    const absl::Span<const T> indices, AbstractColumn* dst) const {
   auto* cast_dst = dynamic_cast<NumericalVectorSequenceColumn*>(dst);
   STATUS_CHECK(cast_dst != nullptr);
   STATUS_CHECK_EQ(vector_length_, cast_dst->vector_length_);
@@ -1176,13 +1185,14 @@ VerticalDataset::NumericalVectorSequenceColumn::ExtractAndAppendTemplate(
   for (size_t new_idx = 0; new_idx < indices_size; new_idx++) {
     const auto src_row_idx = indices[new_idx];
     const auto dst_row_idx = new_idx + init_dst_nrows;
-    DCHECK_LT(src_row_idx, values_.size());
+    DCHECK_LT(src_row_idx, bank_.size());
     if (!IsNa(src_row_idx)) {
-      const auto num_sequences = items_[src_row_idx].size;
-      cast_dst->items_[dst_row_idx] = {cast_dst->values_.size(), num_sequences};
-      const auto src_it = values_.begin();
-      cast_dst->values_.insert(cast_dst->values_.end(), src_it,
-                               src_it + num_sequences * vector_length_);
+      const auto num_sequences = item_sizes_[src_row_idx];
+      cast_dst->item_begins_[dst_row_idx] = cast_dst->bank_.size();
+      cast_dst->item_sizes_[dst_row_idx] = num_sequences;
+      const auto src_it = bank_.begin() + item_begins_[src_row_idx];
+      cast_dst->bank_.insert(cast_dst->bank_.end(), src_it,
+                             src_it + num_sequences * vector_length_);
     } else {
       cast_dst->SetNA(dst_row_idx);
     }

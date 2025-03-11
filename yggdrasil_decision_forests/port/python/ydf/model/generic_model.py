@@ -112,11 +112,11 @@ class ModelIOOptions:
   """Advanced options for saving and loading YDF models.
 
   Attributes:
-      file_prefix: Optional prefix for the model. File prefixes allow multiple
-        models to exist in the same folder. Doing so is heavily DISCOURAGED
-        outside of edge cases. When loading a model, the prefix, if not
-        specified, is auto-detected if possible. When saving a model, the empty
-        string is used as file prefix unless it is explicitly specified.
+    file_prefix: Optional prefix for the model. File prefixes allow multiple
+      models to exist in the same folder. Doing so is heavily DISCOURAGED
+      outside of edge cases. When loading a model, the prefix, if not specified,
+      is auto-detected if possible. When saving a model, the empty string is
+      used as file prefix unless it is explicitly specified.
   """
 
   file_prefix: Optional[str] = None
@@ -290,7 +290,9 @@ Use `model.describe()` for more details
     raise NotImplementedError
 
   @abc.abstractmethod
-  def save(self, path: str, advanced_options=ModelIOOptions()) -> None:
+  def save(
+      self, path: str, advanced_options=ModelIOOptions(), *, pure_serving=False
+  ) -> None:
     """Save the model to disk.
 
     YDF uses a proprietary model format for saving models. A model consists of
@@ -322,6 +324,10 @@ Use `model.describe()` for more details
     Args:
       path: Path to directory to store the model in.
       advanced_options: Advanced options for saving models.
+      pure_serving: If true, save the model without debug information to save
+        disk space. Note that this option might require additional memory during
+        saving, even though the resulting model can be significantly smaller on
+        disk.
     """
     raise NotImplementedError
 
@@ -1266,8 +1272,9 @@ Use `model.describe()` for more details
     if label_column.type != data_spec_pb2.CATEGORICAL:
       semantic = dataspec.Semantic.from_proto_type(label_column.type)
       raise ValueError(
-          "Categorical type expected for classification label."
-          f" Got {semantic} instead."
+          "CATEGORICAL column expected for classification label. Got"
+          f" {semantic} instead. Should the model be a regresion? If so, set"
+          " `task=ydf.REGRESSION` in the learner constructor argument."
       )
 
     if label_column.categorical.is_already_integerized:
@@ -1283,7 +1290,7 @@ Use `model.describe()` for more details
       self,
       data: dataset.InputDataset,
       *,
-      use_slow_engine=False,
+      use_slow_engine: bool = False,
       num_threads: Optional[int] = None,
   ) -> np.ndarray:
     """Returns the most likely predicted class for a classification model.
@@ -1457,7 +1464,9 @@ class GenericCCModel(GenericModel):
       )
     return result
 
-  def save(self, path: str, advanced_options=ModelIOOptions()) -> None:
+  def save(
+      self, path: str, advanced_options=ModelIOOptions(), *, pure_serving=False
+  ) -> None:
     # Warn if the user is trying to save to a nonempty directory without
     # prefixing the model.
     if advanced_options.file_prefix is not None:
@@ -1474,7 +1483,7 @@ class GenericCCModel(GenericModel):
               )
 
     with log.cc_log_context():
-      self._model.Save(path, advanced_options.file_prefix)
+      self._model.Save(path, advanced_options.file_prefix, pure_serving)
 
   def serialize(self) -> bytes:
     with log.cc_log_context():
@@ -1631,6 +1640,22 @@ class GenericCCModel(GenericModel):
     if num_threads is None:
       num_threads = concurrency.determine_optimal_num_threads(training=False)
 
+    enable_permutation_variable_importances = (
+        permutation_variable_importance_rounds > 0
+    )
+    if (
+        enable_permutation_variable_importances
+        and self.task() == Task.ANOMALY_DETECTION
+        and self._model.label_col_idx() == -1
+    ):
+      # TODO: Allow AD evaluation and analysis without providing label at training time.
+      enable_permutation_variable_importances = False
+      log.warning(
+          "ANOMALY DETECTION models must be trained with a label for variable"
+          " importance computation",
+          message_id=log.WarningMessage.AD_PERMUTATION_VARIABLE_IMPORTANCE_NOT_ENABLED,
+      )
+
     with log.cc_log_context():
       ds = dataset.create_vertical_dataset(
           data, data_spec=self._model.data_spec()
@@ -1650,7 +1675,7 @@ class GenericCCModel(GenericModel):
               num_numerical_bins=num_bins,
           ),
           permuted_variable_importance=model_analysis_pb2.Options.PermutedVariableImportance(
-              enabled=permutation_variable_importance_rounds > 0,
+              enabled=enable_permutation_variable_importances,
               num_rounds=permutation_variable_importance_rounds,
           ),
           include_model_structural_variable_importances=True,

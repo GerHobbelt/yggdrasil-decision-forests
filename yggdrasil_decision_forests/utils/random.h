@@ -25,6 +25,11 @@ namespace utils {
 
 using RandomEngine = std::mt19937;
 
+template <typename T>
+T RandomUniformInt(const T& n, RandomEngine* random) {
+  return std::uniform_int_distribution<T>(0, n - 1)(*random);
+}
+
 }  // namespace utils
 }  // namespace yggdrasil_decision_forests
 

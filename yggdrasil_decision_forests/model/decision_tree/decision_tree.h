@@ -31,6 +31,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/types/span.h"
@@ -48,7 +49,7 @@ namespace decision_tree {
 
 using row_t = dataset::VerticalDataset::row_t;
 
-// Variable importance names to be used for all decision tree based model.
+// Variable importance names common for decision tree based models.
 static constexpr char kVariableImportanceNumberOfNodes[] = "NUM_NODES";
 static constexpr char kVariableImportanceNumberOfTimesAsRoot[] = "NUM_AS_ROOT";
 static constexpr char kVariableImportanceSumScore[] = "SUM_SCORE";
@@ -73,12 +74,36 @@ absl::StatusOr<bool> EvalConditionFromColumn(
 absl::StatusOr<bool> EvalCondition(const proto::NodeCondition& condition,
                                    const dataset::proto::Example& example);
 
-absl::Status EvalConditionOnDataset(
-    const dataset::VerticalDataset& dataset,
-    const std::vector<UnsignedExampleIdx>& examples,
-    const proto::NodeCondition& condition, const bool dataset_is_dense,
-    std::vector<UnsignedExampleIdx>* positive_examples,
-    std::vector<UnsignedExampleIdx>* negative_examples);
+// A list of selected examples, and a related buffer used to do some
+// computation.
+struct SelectedExamplesRollingBuffer {
+  absl::Span<UnsignedExampleIdx> active;
+  absl::Span<UnsignedExampleIdx> inactive;
+
+  size_t size() const { return active.size(); }
+  bool empty() const { return active.empty(); }
+
+  static SelectedExamplesRollingBuffer Create(
+      const absl::Span<UnsignedExampleIdx> active,
+      std::vector<UnsignedExampleIdx>* buffer) {
+    buffer->resize(active.size());
+    return {.active = active, .inactive = absl::MakeSpan(*buffer)};
+  }
+};
+
+struct ExampleSplitRollingBuffer {
+  SelectedExamplesRollingBuffer positive_examples;
+  SelectedExamplesRollingBuffer negative_examples;
+
+  size_t num_positive() const { return positive_examples.size(); }
+  size_t num_negative() const { return negative_examples.size(); }
+};
+
+absl::Status EvalConditionOnDataset(const dataset::VerticalDataset& dataset,
+                                    SelectedExamplesRollingBuffer examples,
+                                    const proto::NodeCondition& condition,
+                                    bool dataset_is_dense,
+                                    ExampleSplitRollingBuffer* example_split);
 
 // Argument to the "CheckStructure" method that tests various aspects of the
 // model structure. By default, "CheckStructureOptions" checks if the model
@@ -159,6 +184,9 @@ class NodeWithChildren {
 
   // Instantiate the children.
   void CreateChildren();
+
+  // Removes the children.
+  void ClearChildren();
 
   // Number of nodes.
   int64_t NumNodes() const;
@@ -371,6 +399,10 @@ void AppendModelStructureHeader(
     const dataset::proto::DataSpecification& data_spec, int label_col_idx,
     std::string* description);
 
+std::vector<model::proto::VariableImportance>
+VariableImportanceMapToSortedVector(
+    const absl::flat_hash_map<int, double>& importance_map);
+
 // Gets the number of time each feature is used as root in a set of trees.
 std::vector<model::proto::VariableImportance> StructureNumberOfTimesAsRoot(
     const DecisionForest& decision_trees);
@@ -447,6 +479,12 @@ std::string DebugCompare(
     const dataset::proto::DataSpecification& dataspec, int label_idx,
     absl::Span<const std::unique_ptr<decision_tree::DecisionTree>> a,
     absl::Span<const std::unique_ptr<decision_tree::DecisionTree>> b);
+
+// Square of the euclidean distance between two vectors.
+float SquaredDistance(absl::Span<const float> a, absl::Span<const float> b);
+
+// A dot product between two vectors.
+float DotProduct(absl::Span<const float> a, absl::Span<const float> b);
 
 }  // namespace decision_tree
 }  // namespace model

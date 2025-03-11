@@ -216,7 +216,9 @@ cc_library_ydf(
             "@release_or_nightly//:tensorflow_libtensorflow_framework",
             "@release_or_nightly//:tensorflow_tf_header_lib",
         ],
-        "//conditions:default": ["@org_tensorflow//tensorflow/core:lib"],
+        "//conditions:default": [
+            "@org_tensorflow//tensorflow/core:lib",
+        ],
     }),
 )
 
@@ -543,6 +545,8 @@ cc_library_ydf(
     deps = [
         ":concurrency",
         ":random",
+        ":status_macros",
+        ":synchronization_primitives",
         "//yggdrasil_decision_forests/dataset:data_spec_cc_proto",
         "//yggdrasil_decision_forests/dataset:example_cc_proto",
         "//yggdrasil_decision_forests/dataset:vertical_dataset",
@@ -780,6 +784,7 @@ cc_library_ydf(
         ":partial_dependence_plot",
         ":partial_dependence_plot_cc_proto",
         ":plot",
+        ":status_macros",
         ":uid",
         "//yggdrasil_decision_forests/dataset:data_spec",
         "//yggdrasil_decision_forests/dataset:data_spec_cc_proto",
@@ -791,7 +796,6 @@ cc_library_ydf(
         "//yggdrasil_decision_forests/model:describe",
         "//yggdrasil_decision_forests/model:model_engine_wrapper",
         "//yggdrasil_decision_forests/model:prediction_cc_proto",
-        "//yggdrasil_decision_forests/utils:status_macros",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -862,6 +866,17 @@ cc_library_ydf(
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
         "@zlib",
+    ],
+)
+
+cc_library_ydf(
+    name = "time",
+    srcs = ["time.cc"],
+    hdrs = ["time.h"],
+    deps = [
+        "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/strings:str_format",
+        "@com_google_absl//absl/time",
     ],
 )
 
@@ -1202,6 +1217,7 @@ cc_test(
         ":blob_sequence",
         ":filesystem",
         ":test",
+        ":testing_macros",
         "@com_google_absl//absl/log:check",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/strings",
@@ -1330,6 +1346,16 @@ cc_test(
         ":zlib",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/strings",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "time_test",
+    srcs = ["time_test.cc"],
+    deps = [
+        ":time",
+        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],
 )

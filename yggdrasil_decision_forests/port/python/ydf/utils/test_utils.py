@@ -19,13 +19,14 @@ import enum
 import logging
 import os
 import pathlib
-from typing import Optional, Sequence
+from typing import Optional, Sequence, Tuple
 
 from absl import flags
 from absl.testing import absltest
 import jax
 import numpy as np
 import pandas as pd
+from sklearn import model_selection as sk_model_selection
 
 from ydf.dataset import dataset
 from ydf.dataset import dataspec
@@ -41,6 +42,14 @@ def assertProto2Equal(self: absltest.TestCase, a, b):
 
 def pydf_test_data_path() -> str:
   return os.path.join(data_root_path(), "test_data")
+
+
+def build_pydf_golden_path(filename: str) -> str:
+  return os.path.join(
+      pydf_test_data_path(),
+      "golden",
+      filename,
+  )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -148,7 +157,7 @@ def golden_check_string(
 def assert_almost_equal(a, b):
   msg = test_almost_equal(a, b)
   if msg is not None:
-    raise AssertionError(msg)
+    raise AssertionError(f"Missmatch: {msg}\nWhen comparing:\n{a}\nwith:\n{b}")
 
 
 def test_almost_equal(a, b) -> Optional[str]:
@@ -181,7 +190,7 @@ def test_almost_equal(a, b) -> Optional[str]:
       if not np.array_equal(a, b):
         return f"numpy array mismatch: {a!r} != {b!r}"
     else:
-      if not np.allclose(a, b):
+      if not np.allclose(a, b, equal_nan=True):
         return f"numpy array mismatch: {a!r} != {b!r}"
 
   elif isinstance(a, jax.Array):
@@ -217,3 +226,13 @@ def test_almost_equal(a, b) -> Optional[str]:
     raise ValueError(f"Non implemented comparison for type: {type(a)}")
 
   return None
+
+
+def split_ds(
+    ds: pd.DataFrame, test_ratio: float = 0.3
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+  """Splits a dataset into a training and testing parts."""
+  train_ds, test_ds = sk_model_selection.train_test_split(
+      ds, test_size=test_ratio, random_state=1234
+  )
+  return train_ds, test_ds
