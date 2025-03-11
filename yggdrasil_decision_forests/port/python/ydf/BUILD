@@ -15,6 +15,7 @@ py_library(
         ":version",
         ":ydf_protos",
         "//ydf/api:experimental",
+        "//ydf/api:help",
         "//ydf/api:internal",
         "//ydf/api:util",
         "//ydf/dataset",
@@ -35,6 +36,7 @@ py_library(
         "//ydf/model:model_lib",
         "//ydf/model:model_metadata",
         "//ydf/model:optimizer_logs",
+        "//ydf/model/decision_forest_model",
         "//ydf/model/gradient_boosted_trees_model",
         "//ydf/model/isolation_forest_model",
         "//ydf/model/random_forest_model",
@@ -104,7 +106,6 @@ py_test(
     name = "api_test",
     srcs = ["api_test.py"],
     data = ["@ydf_cc//yggdrasil_decision_forests/test_data"],
-    python_version = "PY3",
     shard_count = 5,
     deps = [
         ":api",

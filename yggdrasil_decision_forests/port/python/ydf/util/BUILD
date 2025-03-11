@@ -38,6 +38,12 @@ py_library(
     ],
 )
 
+py_library(
+    name = "help",
+    srcs = ["help.py"],
+    deps = [],
+)
+
 # Tests
 # =====
 
@@ -48,7 +54,6 @@ py_test(
         "//test_data",
         "@ydf_cc//yggdrasil_decision_forests/test_data",
     ],
-    python_version = "PY3",
     deps = [
         ":tf_example",
         # absl/logging dep,

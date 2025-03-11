@@ -34,7 +34,7 @@
 cls
 setlocal
 
-set YDF_VERSION=0.9.0
+set YDF_VERSION=0.10.0
 set BAZEL=bazel.exe
 set BAZEL_SH=C:\msys64\usr\bin\bash.exe
 set BAZEL_FLAGS=--config=windows_cpp20 --config=windows_avx2
@@ -71,8 +71,8 @@ EXIT /B 0
 :: Compiles and runs the tests.
 :Compile
 set PYTHON=%~1
-%PYTHON% -m pip install -r requirements.txt || goto :error
 %PYTHON% -m pip install -r dev_requirements.txt || goto :error
+%PYTHON% -m pip install -r requirements.txt || goto :error
 %BAZEL% build %BAZEL_FLAGS% -- //ydf/...:all || goto :error
 :: Non blocking tests
 :: TODO: Figure how to get pybind11 + bazel + window to work with the ".pyd" trick.

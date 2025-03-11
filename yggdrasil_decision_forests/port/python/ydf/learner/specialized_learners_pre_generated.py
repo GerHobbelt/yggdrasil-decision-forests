@@ -294,6 +294,16 @@ class RandomForestLearner(generic_learner.GenericCCLearner):
     num_trees: Number of individual decision trees. Increasing the number of
       trees can increase the quality of the model at the expense of size,
       training speed, and inference latency. Default: 300.
+    numerical_vector_sequence_num_examples: For datasets with
+      NUMERICAL_VECTOR_SEQUENCE features (i.e., sequence of fixed-size numerical
+      vectors). Maximum number of examples to use to find splits. A larger value
+      can improve the model quality but takes longer to train.
+      Default: 1000.
+    numerical_vector_sequence_num_random_anchors: For datasets with
+      NUMERICAL_VECTOR_SEQUENCE features (i.e., sequence of fixed-size numerical
+      vectors). The number of randomly generated anchor values. A larger value
+      can improve the model quality but takes longer to train.
+      Default: 100.
     pure_serving_model: Clear the model from any information that is not
       required for model serving. This includes debugging, model interpretation
       and other meta-data. The size of the serialized model can be reduced
@@ -484,6 +494,8 @@ class RandomForestLearner(generic_learner.GenericCCLearner):
       num_candidate_attributes_ratio: Optional[float] = None,
       num_oob_variable_importances_permutations: int = 1,
       num_trees: int = 300,
+      numerical_vector_sequence_num_examples: int = 1000,
+      numerical_vector_sequence_num_random_anchors: int = 100,
       pure_serving_model: bool = False,
       random_seed: int = 123456,
       sampling_with_replacement: bool = True,
@@ -552,6 +564,12 @@ class RandomForestLearner(generic_learner.GenericCCLearner):
             num_oob_variable_importances_permutations
         ),
         "num_trees": num_trees,
+        "numerical_vector_sequence_num_examples": (
+            numerical_vector_sequence_num_examples
+        ),
+        "numerical_vector_sequence_num_random_anchors": (
+            numerical_vector_sequence_num_random_anchors
+        ),
         "pure_serving_model": pure_serving_model,
         "random_seed": random_seed,
         "sampling_with_replacement": sampling_with_replacement,
@@ -667,7 +685,7 @@ class RandomForestLearner(generic_learner.GenericCCLearner):
     return super().train(ds=ds, valid=valid, verbose=verbose)
 
   @classmethod
-  def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
+  def _capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
     return abstract_learner_pb2.LearnerCapabilities(
         support_max_training_duration=True,
         resume_training=False,
@@ -1084,7 +1102,7 @@ class IsolationForestLearner(generic_learner.GenericCCLearner):
     return super().train(ds=ds, valid=valid, verbose=verbose)
 
   @classmethod
-  def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
+  def _capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
     return abstract_learner_pb2.LearnerCapabilities(
         support_max_training_duration=False,
         resume_training=False,
@@ -1413,6 +1431,16 @@ class GradientBoostedTreesLearner(generic_learner.GenericCCLearner):
       the `num_candidate_attributes` is used. Default: None.
     num_trees: Maximum number of decision trees. The effective number of trained
       tree can be smaller if early stopping is enabled. Default: 300.
+    numerical_vector_sequence_num_examples: For datasets with
+      NUMERICAL_VECTOR_SEQUENCE features (i.e., sequence of fixed-size numerical
+      vectors). Maximum number of examples to use to find splits. A larger value
+      can improve the model quality but takes longer to train.
+      Default: 1000.
+    numerical_vector_sequence_num_random_anchors: For datasets with
+      NUMERICAL_VECTOR_SEQUENCE features (i.e., sequence of fixed-size numerical
+      vectors). The number of randomly generated anchor values. A larger value
+      can improve the model quality but takes longer to train.
+      Default: 100.
     pure_serving_model: Clear the model from any information that is not
       required for model serving. This includes debugging, model interpretation
       and other meta-data. The size of the serialized model can be reduced
@@ -1658,6 +1686,8 @@ class GradientBoostedTreesLearner(generic_learner.GenericCCLearner):
       num_candidate_attributes: Optional[int] = -1,
       num_candidate_attributes_ratio: Optional[float] = None,
       num_trees: int = 300,
+      numerical_vector_sequence_num_examples: int = 1000,
+      numerical_vector_sequence_num_random_anchors: int = 100,
       pure_serving_model: bool = False,
       random_seed: int = 123456,
       sampling_method: str = "RANDOM",
@@ -1749,6 +1779,12 @@ class GradientBoostedTreesLearner(generic_learner.GenericCCLearner):
         "num_candidate_attributes": num_candidate_attributes,
         "num_candidate_attributes_ratio": num_candidate_attributes_ratio,
         "num_trees": num_trees,
+        "numerical_vector_sequence_num_examples": (
+            numerical_vector_sequence_num_examples
+        ),
+        "numerical_vector_sequence_num_random_anchors": (
+            numerical_vector_sequence_num_random_anchors
+        ),
         "pure_serving_model": pure_serving_model,
         "random_seed": random_seed,
         "sampling_method": sampling_method,
@@ -1872,7 +1908,7 @@ class GradientBoostedTreesLearner(generic_learner.GenericCCLearner):
     return super().train(ds=ds, valid=valid, verbose=verbose)
 
   @classmethod
-  def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
+  def _capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
     return abstract_learner_pb2.LearnerCapabilities(
         support_max_training_duration=True,
         resume_training=True,
@@ -2030,6 +2066,14 @@ class DistributedGradientBoostedTreesLearner(generic_learner.GenericCCLearner):
       returns the pre-link function model output. For example, in the case of
       binary classification, the pre-link function output is a logic while the
       post-link function is a probability. Default: True.
+    focal_loss_alpha: EXPERIMENTAL, default 0.5. Weighting parameter for focal
+      loss, positive samples weighted by alpha, negative samples by (1-alpha).
+      The default 0.5 value means no active class-level weighting. Only used
+      with focal loss i.e. `loss="BINARY_FOCAL_LOSS"` Default: None.
+    focal_loss_gamma: EXPERIMENTAL, default 2.0. Exponent of the misprediction
+      exponent term in focal loss, corresponds to gamma parameter in
+      https://arxiv.org/pdf/1708.02002.pdf. Only used with focal loss i.e.
+        `loss="BINARY_FOCAL_LOSS"` Default: None.
     force_numerical_discretization: If false, only the numerical column
       safisfying "max_unique_values_for_discretized_numerical" will be
       discretized. If true, all the numerical columns will be discretized.
@@ -2037,6 +2081,25 @@ class DistributedGradientBoostedTreesLearner(generic_learner.GenericCCLearner):
       unique values will be approximated with
       "max_unique_values_for_discretized_numerical" bins. This parameter will
       impact the model training. Default: False.
+    loss: The loss optimized by the model. If not specified (DEFAULT) the loss
+      is selected automatically according to the \\"task\\" and label
+      statistics. For example, if task=CLASSIFICATION and the label has two
+      possible values, the loss will be set to BINOMIAL_LOG_LIKELIHOOD. Possible
+      values are: - `DEFAULT`: Select the loss automatically according to the
+      task and label statistics. - `BINOMIAL_LOG_LIKELIHOOD`: Binomial log
+      likelihood. Only valid for binary classification. - `SQUARED_ERROR`: Least
+      square loss. Only valid for regression. - `POISSON`: Poisson log
+      likelihood loss. Mainly used for counting problems. Only valid for
+      regression. - `MULTINOMIAL_LOG_LIKELIHOOD`: Multinomial log likelihood
+      i.e. cross-entropy. Only valid for binary or multi-class classification. -
+      `LAMBDA_MART_NDCG`: LambdaMART with NDCG@5. - `XE_NDCG_MART`:  Cross
+      Entropy Loss NDCG. See arxiv.org/abs/1911.09798. - `BINARY_FOCAL_LOSS`:
+      Focal loss. Only valid for binary classification. See
+      https://arxiv.org/pdf/1708.02002.pdf. - `POISSON`: Poisson log likelihood.
+        Only valid for regression. - `MEAN_AVERAGE_ERROR`: Mean average error
+        a.k.a. MAE. - `LAMBDA_MART_NDCG5`: DEPRECATED, use LAMBDA_MART_NDCG.
+        LambdaMART with NDCG@5.
+        Default: "DEFAULT".
     max_depth: Maximum depth of the tree. `max_depth=1` means that all trees
       will be roots. `max_depth=-1` means that tree depth is not restricted by
       this parameter. Values <= -2 will be ignored. Default: 6.
@@ -2144,7 +2207,10 @@ class DistributedGradientBoostedTreesLearner(generic_learner.GenericCCLearner):
           abstract_learner_pb2.TrainingConfig
       ] = None,
       apply_link_function: bool = True,
+      focal_loss_alpha: Optional[float] = None,
+      focal_loss_gamma: Optional[float] = None,
       force_numerical_discretization: bool = False,
+      loss: str = "DEFAULT",
       max_depth: int = 6,
       max_unique_values_for_discretized_numerical: int = 16000,
       maximum_model_size_in_memory_in_bytes: float = -1.0,
@@ -2172,7 +2238,10 @@ class DistributedGradientBoostedTreesLearner(generic_learner.GenericCCLearner):
 
     hyper_parameters = {
         "apply_link_function": apply_link_function,
+        "focal_loss_alpha": focal_loss_alpha,
+        "focal_loss_gamma": focal_loss_gamma,
         "force_numerical_discretization": force_numerical_discretization,
+        "loss": loss,
         "max_depth": max_depth,
         "max_unique_values_for_discretized_numerical": (
             max_unique_values_for_discretized_numerical
@@ -2276,7 +2345,7 @@ class DistributedGradientBoostedTreesLearner(generic_learner.GenericCCLearner):
     return super().train(ds=ds, valid=valid, verbose=verbose)
 
   @classmethod
-  def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
+  def _capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
     return abstract_learner_pb2.LearnerCapabilities(
         support_max_training_duration=False,
         resume_training=True,
@@ -2513,6 +2582,16 @@ class CartLearner(generic_learner.GenericCCLearner):
       number_of_input_features x num_candidate_attributes_ratio`. The possible
       values are between ]0, and 1] as well as -1. If not set or equal to -1,
       the `num_candidate_attributes` is used. Default: None.
+    numerical_vector_sequence_num_examples: For datasets with
+      NUMERICAL_VECTOR_SEQUENCE features (i.e., sequence of fixed-size numerical
+      vectors). Maximum number of examples to use to find splits. A larger value
+      can improve the model quality but takes longer to train.
+      Default: 1000.
+    numerical_vector_sequence_num_random_anchors: For datasets with
+      NUMERICAL_VECTOR_SEQUENCE features (i.e., sequence of fixed-size numerical
+      vectors). The number of randomly generated anchor values. A larger value
+      can improve the model quality but takes longer to train.
+      Default: 100.
     pure_serving_model: Clear the model from any information that is not
       required for model serving. This includes debugging, model interpretation
       and other meta-data. The size of the serialized model can be reduced
@@ -2689,6 +2768,8 @@ class CartLearner(generic_learner.GenericCCLearner):
       missing_value_policy: str = "GLOBAL_IMPUTATION",
       num_candidate_attributes: Optional[int] = -1,
       num_candidate_attributes_ratio: Optional[float] = None,
+      numerical_vector_sequence_num_examples: int = 1000,
+      numerical_vector_sequence_num_random_anchors: int = 100,
       pure_serving_model: bool = False,
       random_seed: int = 123456,
       sorting_strategy: str = "IN_NODE",
@@ -2745,6 +2826,12 @@ class CartLearner(generic_learner.GenericCCLearner):
         "missing_value_policy": missing_value_policy,
         "num_candidate_attributes": num_candidate_attributes,
         "num_candidate_attributes_ratio": num_candidate_attributes_ratio,
+        "numerical_vector_sequence_num_examples": (
+            numerical_vector_sequence_num_examples
+        ),
+        "numerical_vector_sequence_num_random_anchors": (
+            numerical_vector_sequence_num_random_anchors
+        ),
         "pure_serving_model": pure_serving_model,
         "random_seed": random_seed,
         "sorting_strategy": sorting_strategy,
@@ -2859,7 +2946,7 @@ class CartLearner(generic_learner.GenericCCLearner):
     return super().train(ds=ds, valid=valid, verbose=verbose)
 
   @classmethod
-  def capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
+  def _capabilities(cls) -> abstract_learner_pb2.LearnerCapabilities:
     return abstract_learner_pb2.LearnerCapabilities(
         support_max_training_duration=True,
         resume_training=False,
