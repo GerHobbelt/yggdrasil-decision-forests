@@ -23,7 +23,10 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from yggdrasil_decision_forests.dataset import data_spec_pb2
+from yggdrasil_decision_forests.model import abstract_model_pb2
+from ydf.dataset import dataspec as dataspec_lib
 from ydf.deep import dataset as deep_dataset_lib
+from ydf.deep import deep_model_pb2
 from ydf.deep import layer as layer_lib
 
 
@@ -43,7 +46,7 @@ class CategoricalDictionary:
 
 @dataclasses.dataclass
 class Preprocessor:
-  """Process the data before being feed to a neural net.
+  """Process the data before being fed to a neural net.
 
   The processing is done in two steps:
     apply_premodel: This function operates on Numpy arrays and contains all the
@@ -64,6 +67,7 @@ class Preprocessor:
 
   dataspec: data_spec_pb2.DataSpecification
   input_features_col_idxs: Sequence[int]
+  # LINT.IfChange(Preprocessor)
   numerical_zscore: bool
   numerical_quantiles: bool
   input_features_col_idxs_set: Set[int] = dataclasses.field(init=False)
@@ -81,9 +85,12 @@ class Preprocessor:
       if column.type != data_spec_pb2.ColumnType.CATEGORICAL:
         continue
 
-      items = sorted(
-          [(item.index, key) for key, item in column.categorical.items.items()]
-      )
+      items = sorted([
+          (item.index, key.decode())
+          for key, item in dataspec_lib.categorical_vocab_iterator(
+              column.categorical
+          )
+      ])
       # Item key sorted by index
       keys = np.array([x[1] for x in items]).astype(np.bytes_)
 
@@ -94,6 +101,30 @@ class Preprocessor:
           sorted_keys=sorted_key,
           key_order=key_order,
       )
+
+  def to_proto(self) -> deep_model_pb2.Preprocessor:
+    return deep_model_pb2.Preprocessor(
+        numerical_zscore=self.numerical_zscore,
+        numerical_quantiles=self.numerical_quantiles,
+    )
+
+  @classmethod
+  def build(
+      cls,
+      preprocessor: deep_model_pb2.Preprocessor,
+      abstract_model: abstract_model_pb2.AbstractModel,
+      dataspec: data_spec_pb2.DataSpecification,
+  ) -> "Preprocessor":
+    return cls(
+        dataspec=dataspec,
+        input_features_col_idxs=list(abstract_model.input_features),
+        numerical_zscore=preprocessor.numerical_zscore
+        if preprocessor.HasField("numerical_zscore")
+        else None,
+        numerical_quantiles=preprocessor.numerical_quantiles
+        if preprocessor.HasField("numerical_quantiles")
+        else None,
+    )
 
   def apply_premodel(
       self,

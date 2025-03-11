@@ -134,6 +134,7 @@ py_library(
     srcs = ["export_jax.py"],
     deps = [
         ":generic_model",
+        # jax dep,
         # numpy dep,
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "//ydf/dataset:dataspec",
@@ -152,7 +153,7 @@ py_library(
     deps = [
         ":generic_model",
         # numpy dep,
-        # sklearn dep,
+        # sklearn:v1_0_2 dep,
         "//ydf/learner:generic_learner",
         "//ydf/learner:specialized_learners",
         "//ydf/model/gradient_boosted_trees_model",
@@ -385,7 +386,7 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         # numpy dep,
-        # sklearn dep,
+        # sklearn:v1_0_2 dep,
         "//ydf/model/decision_forest_model",
     ],
 )

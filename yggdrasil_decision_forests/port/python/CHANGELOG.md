@@ -5,6 +5,13 @@
 ### Feature
 
 -   Expose losses for distributed training.
+-   Add `class_weights` parameter to the learners.
+-   Support for Google Cloud paths for datasets and model IO.
+-   Add utility to facilitate distributed training on VertexAI.
+
+### Fix
+
+-   Fix incorrectly transposed confusion table in HTML.
 
 ## 0.10.0 - 2025-02-11
 
@@ -25,7 +32,7 @@
 
 -   Fix recognition of multidimensional features for Numpy arrays of type
     object.
--   Fix subsample count for small number of training examples for Isolation 
+-   Fix subsample count for small number of training examples for Isolation
     Forests.
 -   Fix NUM_NODES variable importance for oblique splits.
 
@@ -35,7 +42,7 @@
 
 ### Release music
 
-3. Sinfonie in Es-Dur "Sinfonia Eroica", op. 55. Ludwig van Beethoven
+-   Sinfonie in Es-Dur "Sinfonia Eroica", op. 55. Ludwig van Beethoven
 
 ## 0.9.0 - 2024-12-02
 
