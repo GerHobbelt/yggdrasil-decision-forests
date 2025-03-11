@@ -235,12 +235,13 @@ cc_library_ydf(
 
 cc_library_ydf(
     name = "protobuf",
-    srcs = [
-        "protobuf.cc",
-    ],
-    hdrs = [
-        "protobuf.h",
-    ],
+    hdrs = ["protobuf.h"],
+    defines = select({
+        "//yggdrasil_decision_forests:ydf_protobuf_lite": [
+            "YGG_PROTOBUF_LITE",
+        ],
+        "//conditions:default": [],
+    }),
     deps = [
         ":logging",
         "@com_google_absl//absl/status",
@@ -789,6 +790,7 @@ cc_library_ydf(
         "//yggdrasil_decision_forests/model:describe",
         "//yggdrasil_decision_forests/model:model_engine_wrapper",
         "//yggdrasil_decision_forests/model:prediction_cc_proto",
+        "//yggdrasil_decision_forests/utils:status_macros",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/log",
         "@com_google_absl//absl/log:check",
@@ -1256,6 +1258,7 @@ cc_test(
         "//yggdrasil_decision_forests/dataset:data_spec_cc_proto",
         "//yggdrasil_decision_forests/dataset:vertical_dataset",
         "//yggdrasil_decision_forests/dataset:vertical_dataset_io",
+        "//yggdrasil_decision_forests/model:abstract_model",
         "//yggdrasil_decision_forests/model:model_library",
         "//yggdrasil_decision_forests/model:model_testing",
         "//yggdrasil_decision_forests/model/decision_tree",
@@ -1277,6 +1280,7 @@ cc_test(
     deps = [
         ":partial_dependence_plot",
         ":test",
+        ":testing_macros",
         "//yggdrasil_decision_forests/dataset:data_spec_cc_proto",
         "//yggdrasil_decision_forests/dataset:example_cc_proto",
         "//yggdrasil_decision_forests/dataset:vertical_dataset",

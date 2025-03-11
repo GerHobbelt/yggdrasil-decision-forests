@@ -284,8 +284,11 @@ absl::Status RandomForestModel::Validate() const {
 }
 
 std::optional<size_t> RandomForestModel::ModelSizeInBytes() const {
-  return AbstractAttributesSizeInBytes() +
-         decision_tree::EstimateSizeInByte(decision_trees_);
+  OPTIONAL_ASSIGN_OR_RETURN(const auto abstract_size,
+                            AbstractAttributesSizeInBytes());
+  OPTIONAL_ASSIGN_OR_RETURN(const auto tree_size,
+                            decision_tree::EstimateSizeInByte(decision_trees_));
+  return abstract_size + tree_size;
 }
 
 int64_t RandomForestModel::NumNodes() const {

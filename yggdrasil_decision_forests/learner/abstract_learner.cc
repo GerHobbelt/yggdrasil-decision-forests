@@ -56,6 +56,7 @@
 #include "yggdrasil_decision_forests/utils/fold_generator.h"
 #include "yggdrasil_decision_forests/utils/hyper_parameters.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
+#include "yggdrasil_decision_forests/utils/protobuf.h"
 #include "yggdrasil_decision_forests/utils/random.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
 #include "yggdrasil_decision_forests/utils/synchronization_primitives.h"
@@ -491,6 +492,13 @@ absl::Status AbstractLearner::CheckConfiguration(
     return absl::OkStatus();
   }
 
+  if (config.has_maximum_model_size_in_memory_in_bytes() &&
+      !utils::ProtoSizeInBytesIsAvailable()) {
+    return absl::InvalidArgumentError(
+        "Cannot constraint the model size during training as YDF was compiled "
+        "with protobuf lite");
+  }
+
   const auto& label_col_spec = data_spec.columns(config_link.label());
   // Check the type of the label column.
   switch (config.task()) {
@@ -818,7 +826,8 @@ absl::StatusOr<metric::proto::EvaluationResults> EvaluateLearnerOrStatus(
       evaluation_options, label_col_spec, &aggregated_evaluation));
   {
     yggdrasil_decision_forests::utils::concurrency::ThreadPool pool(
-        "Evaluator", deployment_evaluation.num_threads());
+        deployment_evaluation.num_threads(),
+        {.name_prefix = std::string("Evaluator")});
     pool.StartWorkers();
     for (int fold_idx = 0; fold_idx < num_folds; fold_idx++) {
       pool.Schedule([&train_and_evaluate, fold_idx, seed{rnd()}]() {

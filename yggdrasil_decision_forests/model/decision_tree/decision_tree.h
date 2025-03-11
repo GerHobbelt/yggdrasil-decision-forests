@@ -36,6 +36,7 @@
 #include "absl/types/span.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
 #include "yggdrasil_decision_forests/dataset/example.pb.h"
+#include "yggdrasil_decision_forests/dataset/types.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/model/abstract_model.pb.h"
 #include "yggdrasil_decision_forests/model/decision_tree/decision_tree.pb.h"
@@ -60,17 +61,17 @@ static constexpr char kVariableImportanceInvMeanMinDepth[] =
 std::string ConditionTypeToString(proto::Condition::TypeCase type);
 
 // Evaluate a condition on an example contained in a vertical dataset.
-bool EvalCondition(const proto::NodeCondition& condition,
-                   const dataset::VerticalDataset& dataset,
-                   dataset::VerticalDataset::row_t example_idx);
+absl::StatusOr<bool> EvalCondition(const proto::NodeCondition& condition,
+                                   const dataset::VerticalDataset& dataset,
+                                   dataset::VerticalDataset::row_t example_idx);
 
-bool EvalConditionFromColumn(
+absl::StatusOr<bool> EvalConditionFromColumn(
     const proto::NodeCondition& condition,
     const dataset::VerticalDataset::AbstractColumn* column_data,
     const dataset::VerticalDataset& dataset, row_t example_idx);
 
-bool EvalCondition(const proto::NodeCondition& condition,
-                   const dataset::proto::Example& example);
+absl::StatusOr<bool> EvalCondition(const proto::NodeCondition& condition,
+                                   const dataset::proto::Example& example);
 
 absl::Status EvalConditionOnDataset(
     const dataset::VerticalDataset& dataset,
@@ -122,7 +123,7 @@ class NodeWithChildren {
  public:
   // Approximate size in memory (expressed in bytes) of the node and all its
   // children.
-  size_t EstimateSizeInByte() const;
+  std::optional<size_t> EstimateSizeInByte() const;
 
   // Exports the node (and its children) to a RecordIO writer. The nodes are
   // stored sequentially with a depth-first exploration.
@@ -236,7 +237,7 @@ class DecisionTree {
  public:
   // Estimates the memory usage of the model in RAM. The serialized or the
   // compiled version of the model can be much smaller.
-  size_t EstimateModelSizeInBytes() const;
+  std::optional<size_t> EstimateModelSizeInBytes() const;
 
   // Number of nodes in the tree.
   int64_t NumNodes() const;
@@ -347,7 +348,8 @@ typedef std::vector<std::unique_ptr<DecisionTree>> DecisionForest;
 void SetLeafIndices(DecisionForest* trees);
 
 // Estimate the size (in bytes) of a list of decision trees.
-size_t EstimateSizeInByte(const DecisionForest& trees);
+// Returns 0 if the size cannot be estimated.
+std::optional<size_t> EstimateSizeInByte(const DecisionForest& trees);
 
 // Number of nodes in a list of decision trees.
 int64_t NumberOfNodes(const DecisionForest& trees);

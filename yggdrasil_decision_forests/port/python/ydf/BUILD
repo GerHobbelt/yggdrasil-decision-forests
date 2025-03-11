@@ -19,17 +19,21 @@ py_library(
         "//ydf/dataset",
         "//ydf/dataset:dataspec",
         "//ydf/learner:custom_loss_py",
+        "//ydf/learner:feature_selector",
         "//ydf/learner:generic_learner",
         "//ydf/learner:specialized_learners",
         "//ydf/learner:tuner",
         "//ydf/learner:worker",
+        "//ydf/metric:evaluate",
         "//ydf/model:export_docker",  # buildcleaner: keep
         "//ydf/model:export_jax",  # buildcleaner: keep
         "//ydf/model:export_sklearn",  # buildcleaner: keep
         "//ydf/model:export_tf",  # buildcleaner: keep
+        "//ydf/model:feature_selector_logs",
         "//ydf/model:generic_model",
         "//ydf/model:model_lib",
         "//ydf/model:model_metadata",
+        "//ydf/model:optimizer_logs",
         "//ydf/model/gradient_boosted_trees_model",
         "//ydf/model/isolation_forest_model",
         "//ydf/model/random_forest_model",

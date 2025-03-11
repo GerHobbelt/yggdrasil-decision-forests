@@ -41,6 +41,21 @@ and evaluation.
 
 -   [RandomSearchTuner](RandomSearchTuner.md)
 -   [VizierTuner](VizierTuner.md) (currently, for Googlers only)
+-   [OptimizerLogs](OptimizerLogs.md)
+
+## Feature Selector
+
+A **Feature Selector** finds the optimal set of input features for the model.
+
+-   [BackwardSelectionFeatureSelector](BackwardSelectionFeatureSelector.md)
+-   [FeatureSelectorLogs](FeatureSelectorLogs.md)
+
+## Prediction Evaluation
+
+**Prediction Evaluation** allows evaluating arbitrary predictions with YDF's
+tools. 
+
+-   [Prediction evaluation](evaluate.md)
 
 ## Other
 

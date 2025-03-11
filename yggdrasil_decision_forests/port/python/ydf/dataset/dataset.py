@@ -785,8 +785,12 @@ def create_vertical_dataset_from_dict_of_values(
     dataset._dataset.SetMultiDimDataspec(effective_unroll_feature_info)  # pylint: disable=protected-access
 
     warnings = validate_dataspec(dataset.data_spec(), columns_to_check)
-    for warning in warnings:
-      log.warning("%s", warning)
+    if warnings:
+      log.warning(
+          "%s",
+          "\n".join(warnings),
+          message_id=log.WarningMessage.CATEGORICAL_LOOK_LIKE_NUMERICAL,
+      )
 
   dataset._finalize(set_num_rows_in_data_spec=(data_spec is None))  # pylint: disable=protected-access
   return dataset
@@ -820,16 +824,20 @@ def validate_dataspec(
 
     count_look_numerical = 0
     count_total = 0
+    examples_of_value = []
     for k, v in column.categorical.items.items():
       count_total += v.count
       if look_numerical(k):
         count_look_numerical += v.count
+        if len(examples_of_value) < 3:
+          examples_of_value.append(k)
 
     if count_look_numerical >= 0.8 * count_total:
       warnings.append(
-          f"Column {column.name!r} is CATEGORICAL but most of its values look"
-          " like numbers. Should the column not be NUMERICAL? If"
-          " so, feed numerical values instead of string or objects."
+          f"Column {column.name!r} is detected as CATEGORICAL but its values"
+          f" look like numbers (e.g., {', '.join(examples_of_value)}). Should"
+          " the column not be NUMERICAL instead? If so, feed numerical values"
+          " instead of strings or objects."
       )
   return warnings
 

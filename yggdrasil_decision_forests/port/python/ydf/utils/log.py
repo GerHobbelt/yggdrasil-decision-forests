@@ -63,6 +63,7 @@ class WarningMessage(enum.Enum):
   UNNECESSARY_TASK_ARGUMENT = 9
   UNNECESSARY_LABEL_ARGUMENT = 10
   TFE_READING_IN_PYTHON_IS_SLOW = 11
+  CATEGORICAL_LOOK_LIKE_NUMERICAL = 12
 
 
 # List of already showed warning message that should not be displayed again.
@@ -103,6 +104,14 @@ def verbose(level: Union[int, bool] = 2) -> int:
   old = _VERBOSE_LEVEL
   _VERBOSE_LEVEL = level
   return old
+
+
+def reduce_verbose(v: Union[int, bool]) -> int:
+  """Reduces verbose by "one level"."""
+  if isinstance(v, int):
+    return max(0, v - 1)
+  else:
+    return 0
 
 
 def current_log_level() -> int:
@@ -159,7 +168,7 @@ def warning(
     _ALREADY_DISPLAYED_WARNING_IDS.add(message_id)
 
   if _VERBOSE_LEVEL >= 1:
-    print("Warning:", msg % args, flush=True, file=sys.stderr)
+    print("[Warning]", msg % args, flush=True, file=sys.stderr)
 
 
 def strict(value: bool = True) -> None:

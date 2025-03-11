@@ -366,11 +366,12 @@ class AbstractModel {
   // compiled version of the model can be much smaller.
   //
   // This value should not be relied upon in tests.
+  // May be empty if the model does not support this operation.
   virtual std::optional<size_t> ModelSizeInBytes() const { return {}; }
 
   // Estimates the memory usage of the attributes defined in the "AbstractModel"
-  // object.
-  size_t AbstractAttributesSizeInBytes() const;
+  // object. Returns {} if the model size is not available.
+  std::optional<size_t> AbstractAttributesSizeInBytes() const;
 
   // List of input features of the model.
   const std::vector<int>& input_features() const { return input_features_; }
@@ -420,6 +421,15 @@ class AbstractModel {
   std::optional<proto::HyperparametersOptimizerLogs>*
   mutable_hyperparameter_optimizer_logs() {
     return &hyperparameter_optimizer_logs_;
+  }
+
+  // Feature selection logs
+  const std::optional<proto::FeatureSelectionLogs>& feature_selection_logs()
+      const {
+    return feature_selection_logs_;
+  }
+  std::optional<proto::FeatureSelectionLogs>* mutable_feature_selection_logs() {
+    return &feature_selection_logs_;
   }
 
   // Clear the model from any information that is not required for model
@@ -492,6 +502,9 @@ class AbstractModel {
   // Prints information about the hyper-parameter optimizer logs.
   void AppendHyperparameterOptimizerLogs(std::string* description) const;
 
+  // Prints information about the feature selection logs.
+  void AppendFeatureSelectionLogs(std::string* description) const;
+
   // Checks if the ModelIOOptions are sufficient to load the model.
   //
   // At this time, this function checks if a prefix if given.
@@ -541,6 +554,8 @@ class AbstractModel {
 
   std::optional<proto::HyperparametersOptimizerLogs>
       hyperparameter_optimizer_logs_;
+
+  std::optional<proto::FeatureSelectionLogs> feature_selection_logs_;
 
   // Indicate if a model is pure for serving i.e. the model was tripped of all
   // information not required for serving.

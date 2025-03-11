@@ -4,7 +4,7 @@ hide: toc
 ---
 #
 
-![](image/logo_v2.png){: .center .logo}
+![](image/logo_v2_christmas.png){: .center .logo}
 
 <div class="intro_text">
 YDF is a library to train, evaluate, interpret, and
@@ -91,8 +91,8 @@ To install YDF from [PyPI](https://pypi.org/project/ydf/), run:
 pip install ydf -U
 ```
 
-YDF is available on Python 3.8, 3.9, 3.11 and 3.12, on Windows x86-64, Linux
-x86-64, and macOS ARM64.
+YDF is available on Python 3.8, 3.9, 3.10, 3.11 and 3.12, on Windows x86-64
+Linux x86-64, and macOS ARM64.
 
 ## Usage example
 

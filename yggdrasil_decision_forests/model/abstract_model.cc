@@ -116,6 +116,11 @@ void AbstractModel::ExportProto(const AbstractModel& model,
     *proto->mutable_hyperparameter_optimizer_logs() =
         model.hyperparameter_optimizer_logs_.value();
   }
+
+  if (model.feature_selection_logs_.has_value()) {
+    *proto->mutable_feature_selection_logs() =
+        model.feature_selection_logs_.value();
+  }
 }
 
 void AbstractModel::ImportProto(const proto::AbstractModel& proto,
@@ -142,6 +147,9 @@ void AbstractModel::ImportProto(const proto::AbstractModel& proto,
   if (proto.has_hyperparameter_optimizer_logs()) {
     model->hyperparameter_optimizer_logs_ =
         proto.hyperparameter_optimizer_logs();
+  }
+  if (proto.has_feature_selection_logs()) {
+    model->feature_selection_logs_ = proto.feature_selection_logs();
   }
 }
 
@@ -921,6 +929,28 @@ void AbstractModel::AppendDescriptionAndStatistics(
   if (hyperparameter_optimizer_logs_.has_value()) {
     AppendHyperparameterOptimizerLogs(description);
   }
+
+  if (feature_selection_logs_.has_value()) {
+    AppendFeatureSelectionLogs(description);
+  }
+}
+
+void AbstractModel::AppendFeatureSelectionLogs(std::string* description) const {
+  absl::StrAppend(description, "Feature selection logs:\n\n");
+  for (int iteration_idx = 0;
+       iteration_idx < feature_selection_logs_->iterations_size();
+       iteration_idx++) {
+    const auto& iteration =
+        feature_selection_logs_->iterations()[iteration_idx];
+    absl::StrAppendFormat(
+        description,
+        "Iteration:%d Score:%g\n\tFeatures: %s\n\tMetrics:", iteration_idx,
+        iteration.score(), absl::StrJoin(iteration.features(), ","));
+    for (const auto& metric : iteration.metrics()) {
+      absl::StrAppendFormat(description, "%s:%g", metric.first, metric.second);
+    }
+    absl::StrAppend(description, "\n");
+  }
 }
 
 void AbstractModel::AppendHyperparameterOptimizerLogs(
@@ -1246,6 +1276,12 @@ void AbstractModel::CopyAbstractModelMetaData(AbstractModel* dst) const {
   } else {
     dst->hyperparameter_optimizer_logs_ = {};
   }
+
+  if (feature_selection_logs_.has_value()) {
+    dst->feature_selection_logs_ = feature_selection_logs_;
+  } else {
+    dst->feature_selection_logs_ = {};
+  }
 }
 
 absl::Status AbstractModel::Validate() const {
@@ -1407,15 +1443,20 @@ AbstractModel::BuildFastEngine(
   return engine_or;
 }
 
-size_t AbstractModel::AbstractAttributesSizeInBytes() const {
-  size_t size = sizeof(*this) + name_.size() + data_spec_.SpaceUsedLong();
+std::optional<size_t> AbstractModel::AbstractAttributesSizeInBytes() const {
+  if (!utils::ProtoSizeInBytesIsAvailable()) {
+    return {};
+  }
+  size_t size = sizeof(*this) + name_.size() +
+                utils::ProtoSizeInBytes(data_spec_).value_or(0);
   size +=
       input_features_.size() * sizeof(decltype(input_features_)::value_type);
   if (weights_.has_value()) {
-    size += weights_->ByteSizeLong();
+    size += utils::ProtoSizeInBytes(weights_.value()).value_or(0);
   }
   for (const auto& v : precomputed_variable_importances_) {
-    size += sizeof(v) + v.first.size() + v.second.SpaceUsedLong();
+    size += sizeof(v) + v.first.size() +
+            utils::ProtoSizeInBytes(v.second).value_or(0);
   }
   return size;
 }
@@ -1434,6 +1475,7 @@ absl::Status AbstractModel::MakePureServing() {
   is_pure_model_ = true;
   precomputed_variable_importances_.clear();
   hyperparameter_optimizer_logs_ = {};
+  feature_selection_logs_ = {};
   return Validate();
 }
 

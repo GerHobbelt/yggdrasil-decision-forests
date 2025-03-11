@@ -93,6 +93,7 @@ py_library(
     srcs = ["generic_model.py"],
     deps = [
         ":analysis",
+        ":feature_selector_logs",
         ":model_metadata",
         ":optimizer_logs",
         ":template_cpp_export",
@@ -104,7 +105,6 @@ py_library(
         "//ydf/cc:ydf",
         "//ydf/dataset",
         "//ydf/dataset:dataspec",
-        "//ydf/dataset/io:dataset_io",
         "//ydf/metric",
         "//ydf/utils:concurrency",
         "//ydf/utils:html",
@@ -226,6 +226,15 @@ py_library(
     ],
 )
 
+py_library(
+    name = "feature_selector_logs",
+    srcs = ["feature_selector_logs.py"],
+    deps = [
+        "//ydf/metric",
+        "@ydf_cc//yggdrasil_decision_forests/model:abstract_model_py_proto",
+    ],
+)
+
 # Tests
 # =====
 
@@ -270,7 +279,6 @@ py_test(
     tags = ["manual"],
     deps = [
         ":export_tf",
-        ":generic_model",
         ":model_lib",
         # absl/logging dep,
         # absl/testing:absltest dep,

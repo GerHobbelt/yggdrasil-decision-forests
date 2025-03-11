@@ -18,6 +18,8 @@
 #ifndef YGGDRASIL_DECISION_FORESTS_UTILS_PROTOBUF_H_
 #define YGGDRASIL_DECISION_FORESTS_UTILS_PROTOBUF_H_
 
+#include <cstddef>
+#include <optional>
 #include <string>
 
 #include "absl/status/status.h"
@@ -82,8 +84,50 @@ class ProtoWriterInterface {
 // the full message (unredacted) is to be serialized in a way that can be
 // deserialized with ParseTextProto(). single_line_mode controls whether the
 // output is in single-line or multi-line (default).
-absl::StatusOr<std::string> SerializeTextProto(const google::protobuf::Message& message,
-                                               bool single_line_mode = false);
+template <typename T>
+absl::StatusOr<std::string> SerializeTextProto(const T& message,
+                                               bool single_line_mode = false) {
+#ifdef YGG_PROTOBUF_LITE
+  return absl::UnimplementedError(
+      "YDF has been compiled with YGG_PROTOBUF_LITE. Cannot serialize proto "
+      "message.");
+#else
+  std::string serialized_message;
+  google::protobuf::TextFormat::Printer printer;
+  if (single_line_mode) {
+    printer.SetSingleLineMode(true);
+  }
+  if (!printer.PrintToString(message, &serialized_message)) {
+    return absl::InvalidArgumentError("Cannot serialize proto message.");
+  }
+  if (single_line_mode && !serialized_message.empty() &&
+      serialized_message.back() == ' ') {
+    serialized_message.pop_back();
+  }
+  return serialized_message;
+#endif  // YGG_PROTOBUF_LITE
+}
+
+// Returns the approximate size of a proto in bytes. If the proto size cannot be
+// computed (e.g., if compiled with ProtoLite, returns {}).
+template <typename T>
+std::optional<std::size_t> ProtoSizeInBytes(const T& message) {
+#ifdef YGG_PROTOBUF_LITE
+  return {};
+#else
+  return message.SpaceUsedLong();
+#endif
+}
+
+// Tells if it is possible to compute the size of a proto i.e. will
+// ProtoSizeInBytes return a value.
+inline bool ProtoSizeInBytesIsAvailable() {
+#ifdef YGG_PROTOBUF_LITE
+  return false;
+#else
+  return true;
+#endif
+}
 
 }  // namespace utils
 }  // namespace yggdrasil_decision_forests

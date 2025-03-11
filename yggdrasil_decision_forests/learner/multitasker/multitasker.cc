@@ -32,6 +32,7 @@
 #include "yggdrasil_decision_forests/model/multitasker/multitasker.h"
 #include "yggdrasil_decision_forests/serving/example_set.h"
 #include "yggdrasil_decision_forests/utils/concurrency.h"
+#include "yggdrasil_decision_forests/utils/protobuf.h"
 #include "yggdrasil_decision_forests/utils/regex.h"
 #include "yggdrasil_decision_forests/utils/status_macros.h"
 #include "yggdrasil_decision_forests/utils/synchronization_primitives.h"
@@ -258,8 +259,9 @@ MultitaskerLearner::TrainWithStatusImpl(
               << secondary_task_idxs.size() << " model(s)";
 
     {
-      utils::concurrency::ThreadPool pool("multitasker",
-                                          deployment().num_threads());
+      utils::concurrency::ThreadPool pool(
+          deployment().num_threads(),
+          {.name_prefix = std::string("multitasker")});
       pool.StartWorkers();
       for (const auto subtask_idx : secondary_task_idxs) {
         pool.Schedule([train_subtask_nostatus, subtask_idx]() {
@@ -288,8 +290,9 @@ MultitaskerLearner::TrainWithStatusImpl(
   if (!primary_task_idxs.empty()) {
     LOG(INFO) << "Train multitasker primary tasks with "
               << primary_task_idxs.size() << " model(s)";
-    utils::concurrency::ThreadPool pool("multitasker",
-                                        deployment().num_threads());
+    utils::concurrency::ThreadPool pool(
+        deployment().num_threads(),
+        {.name_prefix = std::string("multitasker")});
     pool.StartWorkers();
     for (const auto subtask_idx : primary_task_idxs) {
       pool.Schedule([train_subtask_nostatus, subtask_idx]() {
@@ -343,6 +346,11 @@ MultitaskerLearner::BuildSubTrainingConfig(const int learner_idx) const {
 
   if (training_config().has_maximum_model_size_in_memory_in_bytes() &&
       !sub_learner_config.has_maximum_model_size_in_memory_in_bytes()) {
+    if (!utils::ProtoSizeInBytesIsAvailable()) {
+      return absl::InvalidArgumentError(
+          "YDF has been compiled with YGG_PROTOBUF_LITE. Model size "
+          "cannot be estimated.");
+    }
     sub_learner_config.set_maximum_model_size_in_memory_in_bytes(
         training_config().maximum_model_size_in_memory_in_bytes());
   }
