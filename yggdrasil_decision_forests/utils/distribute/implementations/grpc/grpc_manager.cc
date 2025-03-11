@@ -18,6 +18,8 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <string>
+#include <vector>
 
 #include "grpcpp/create_channel.h"
 #include "grpcpp/support/channel_arguments.h"
@@ -239,9 +241,9 @@ absl::StatusOr<proto::Server::Stub*> GRPCManager::UpdateWorkerConnection(
   if (worker->expected_address != worker->connected_address) {
     // The worker has moved.
 
-    LOG(INFO) << "Update address of worker #" << worker->worker_idx << " from"
-              << worker->connected_address << " to "
-              << worker->expected_address;
+    LOG(INFO) << "Update address of worker #" << worker->worker_idx
+              << " from \"" << worker->connected_address << "\" to \""
+              << worker->expected_address << "\"";
 
     worker->connected_address = worker->expected_address;
 
@@ -294,35 +296,43 @@ absl::StatusOr<Blob> GRPCManager::WorkerRunImp(Blob blob, Worker* worker) {
 
   proto::Answer answer;
   while (true) {
+    // Run the job remotely and wait for the result.
     grpc::ClientContext context;
     ConfigureClientContext(&context);
+
     const auto status = stub->Run(&context, query, &answer);
+    if (done_was_called_) {
+      return absl::InvalidArgumentError("Job interrupted");
+    }
+
+    // Check the result.
     if (!status.ok()) {
       if (status.error_message() == "UNAVAILABLE: worker config required") {
         // The worker received the request, but the worker is lacking the worker
         // configuration field. The request should be re-sent with the worker
         // configuration.
-        LOG(WARNING) << "Send worker configuration to worker #"
-                     << worker->worker_idx;
+        LOG(WARNING) << "Send configuration to worker #" << worker->worker_idx;
         utils::concurrency::MutexLock l(&mutex_worker_config_);
         *query.mutable_worker_config() = worker_config_;
         continue;
       }
-
-      if (verbosity_ >= 1) {
-        LOG(WARNING) << "GRPC to worker #" << worker->worker_idx
-                     << " failed with error: " << status.error_message();
-      }
       if (IsTransientError(status)) {
+        if (verbosity_ >= 1) {
+          LOG(WARNING) << "GRPC to worker #" << worker->worker_idx
+                       << " has a TRANSIENT error: " << status.error_message();
+        }
         // The worker is temporarily not available.
         absl::SleepFor(absl::Seconds(5));
         ASSIGN_OR_RETURN(stub, UpdateWorkerConnection(worker));
         continue;
       } else {
-        // Something is not right.
-        LOG(INFO)
-            << "Fatal error in GRPC communication. If this is in fact a "
-               "transiant error, update \"IsTransiantError\" accordingly.";
+        if (verbosity_ >= 1) {
+          LOG(WARNING)
+              << "GRPC to worker #" << worker->worker_idx
+              << " failed with the FATAL error (If this is in fact a "
+                 "TRANSIENT error, update \"IsTrensiantError\" accordingly): "
+              << status.error_message();
+        }
         return GrpcStatusToAbslStatus(status);
       }
     }
@@ -441,9 +451,9 @@ absl::Status GRPCManager::Done(std::optional<bool> kill_worker_manager) {
 
   for (auto& worker : workers_) {
     worker->async_pending_queries_.Close();
-    worker->async_pending_queries_.Clear();
-
     worker->peer_worker_update_workers_.Close();
+
+    worker->async_pending_queries_.Clear();
     worker->peer_worker_update_workers_.Clear();
   }
 

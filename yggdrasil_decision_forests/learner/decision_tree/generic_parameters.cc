@@ -25,6 +25,7 @@
 #include "absl/strings/str_cat.h"
 #include "absl/strings/str_format.h"
 #include "absl/strings/string_view.h"
+#include "absl/strings/substitute.h"
 #include "yggdrasil_decision_forests/learner/abstract_learner.h"
 #include "yggdrasil_decision_forests/learner/decision_tree/decision_tree.pb.h"
 #include "yggdrasil_decision_forests/utils/hyper_parameters.h"
@@ -313,13 +314,104 @@ Increasing this value increases training and inference time (on average). This v
         kHParamSplitAxisSparseObliqueWeightsBinary);
     param->mutable_categorical()->add_possible_values(
         kHParamSplitAxisSparseObliqueWeightsContinuous);
+    param->mutable_categorical()->add_possible_values(
+        kHParamSplitAxisSparseObliqueWeightsPowerOfTwo);
+    param->mutable_categorical()->add_possible_values(
+        kHParamSplitAxisSparseObliqueWeightsInteger);
     param->mutable_conditional()->set_control_field(kHParamSplitAxis);
     param->mutable_conditional()->mutable_categorical()->add_values(
         kHParamSplitAxisSparseOblique);
-    param->mutable_documentation()->set_description(
-        R"(For sparse oblique splits i.e. `split_axis=SPARSE_OBLIQUE`. Possible values:
+    param->mutable_documentation()->set_description(absl::Substitute(
+        R"(For sparse oblique splits i.e. `split_axis=SPARSE_OBLIQUE`. 
+Note that normalization is applied after sampling the weights, e.g.
+binary weights are only guaranteed binary if normalization is NONE.
+
+Possible values:
 - `BINARY`: The oblique weights are sampled in {-1,1} (default).
-- `CONTINUOUS`: The oblique weights are be sampled in [-1,1].)");
+- `CONTINUOUS`: The oblique weights are be sampled in [-1,1].
+- `POWER_OF_TWO`: The oblique weights are powers of two. The exponents are sampled
+                  uniformly in [$0, $1], the sign is uniformly sampled.
+- `INTEGER`: The weights are integers sampled uniformly from the range [$2, $3].)",
+        kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMinExponent,
+        kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMaxExponent,
+        kHParamSplitAxisSparseObliqueWeightsIntegerMinimum,
+        kHParamSplitAxisSparseObliqueWeightsIntegerMaximum));
+  }
+
+  {
+    ASSIGN_OR_RETURN(
+        auto param,
+        get_params(kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMinExponent));
+    param->mutable_integer()->set_default_value(
+        config.sparse_oblique_split().power_of_two().min_exponent());
+    param->mutable_conditional()->set_control_field(
+        kHParamSplitAxisSparseObliqueWeights);
+    param->mutable_conditional()->mutable_categorical()->add_values(
+        (kHParamSplitAxisSparseObliqueWeightsPowerOfTwo));
+    param->mutable_documentation()->set_description(
+        R"(For sparse oblique splits i.e. `split_axis=SPARSE_OBLIQUE` with 
+power-of-two weights i.e. `sparse_oblique_weights=POWER_OF_TWO`. Minimum exponent of the weights)");
+  }
+
+  {
+    ASSIGN_OR_RETURN(
+        auto param,
+        get_params(kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMaxExponent));
+    param->mutable_integer()->set_default_value(
+        config.sparse_oblique_split().power_of_two().max_exponent());
+    param->mutable_conditional()->set_control_field(
+        kHParamSplitAxisSparseObliqueWeights);
+    param->mutable_conditional()->mutable_categorical()->add_values(
+        (kHParamSplitAxisSparseObliqueWeightsPowerOfTwo));
+    param->mutable_documentation()->set_description(
+        R"(For sparse oblique splits i.e. `split_axis=SPARSE_OBLIQUE` with 
+power-of-two weights i.e. `sparse_oblique_weights=POWER_OF_TWO`. Maximum exponent of the weights)");
+  }
+
+  {
+    ASSIGN_OR_RETURN(
+        auto param,
+        get_params(kHParamSplitAxisSparseObliqueWeightsIntegerMinimum));
+    param->mutable_integer()->set_default_value(
+        config.sparse_oblique_split().integer().minimum());
+    param->mutable_conditional()->set_control_field(
+        kHParamSplitAxisSparseObliqueWeights);
+    param->mutable_conditional()->mutable_categorical()->add_values(
+        (kHParamSplitAxisSparseObliqueWeightsInteger));
+    param->mutable_documentation()->set_description(
+        R"(For sparse oblique splits i.e. `split_axis=SPARSE_OBLIQUE` with 
+integer weights i.e. `sparse_oblique_weights=INTEGER`. Minimum value of the weights.)");
+  }
+
+  {
+    ASSIGN_OR_RETURN(
+        auto param,
+        get_params(kHParamSplitAxisSparseObliqueWeightsIntegerMaximum));
+    param->mutable_integer()->set_default_value(
+        config.sparse_oblique_split().integer().maximum());
+    param->mutable_conditional()->set_control_field(
+        kHParamSplitAxisSparseObliqueWeights);
+    param->mutable_conditional()->mutable_categorical()->add_values(
+        (kHParamSplitAxisSparseObliqueWeightsInteger));
+    param->mutable_documentation()->set_description(
+        R"(For sparse oblique splits i.e. `split_axis=SPARSE_OBLIQUE` with 
+integer weights i.e. `sparse_oblique_weights=INTEGER`. Maximum value of the weights)");
+  }
+
+  {
+    ASSIGN_OR_RETURN(auto param,
+                     get_params(kHParamSplitAxisSparseObliqueMaxNumFeatures));
+    param->mutable_integer()->set_default_value(
+        config.sparse_oblique_split().max_num_features());
+    param->mutable_conditional()->set_control_field(kHParamSplitAxis);
+    param->mutable_integer()->set_minimum(-1);
+    param->mutable_documentation()->set_proto_field("max_num_features");
+    param->mutable_conditional()->mutable_categorical()->add_values(
+        kHParamSplitAxisSparseOblique);
+    param->mutable_documentation()->set_description(
+        R"(For sparse oblique splits i.e. `split_axis=SPARSE_OBLIQUE`. 
+Controls the maximum number of features in a split.Set to -1 for no maximum.
+Use only if a hard maximum on the number of variables is needed, otherwise prefer `projection_density_factor` for controlling the number of features per projection.)");
   }
 
   {
@@ -737,6 +829,23 @@ absl::Status SetHyperParameters(
 
   {
     const auto hparam =
+        generic_hyper_params->Get(kHParamSplitAxisSparseObliqueMaxNumFeatures);
+    if (hparam.has_value()) {
+      const auto hparam_value = hparam.value().value().integer();
+      if (dt_config->has_sparse_oblique_split()) {
+        dt_config->mutable_sparse_oblique_split()->set_max_num_features(
+            hparam_value);
+      } else {
+        return absl::InvalidArgumentError(
+            absl::StrCat(kHParamSplitAxisSparseObliqueMaxNumFeatures,
+                         " only works with sparse oblique trees "
+                         "(split_axis=SPARSE_OBLIQUE)"));
+      }
+    }
+  }
+
+  {
+    const auto hparam =
         generic_hyper_params->Get(kHParamSplitAxisSparseObliqueWeights);
     if (hparam.has_value()) {
       if (dt_config->has_sparse_oblique_split()) {
@@ -745,18 +854,104 @@ absl::Status SetHyperParameters(
           dt_config->mutable_sparse_oblique_split()->mutable_binary();
         } else if (value == kHParamSplitAxisSparseObliqueWeightsContinuous) {
           dt_config->mutable_sparse_oblique_split()->mutable_continuous();
+        } else if (value == kHParamSplitAxisSparseObliqueWeightsPowerOfTwo) {
+          dt_config->mutable_sparse_oblique_split()->mutable_power_of_two();
+        } else if (value == kHParamSplitAxisSparseObliqueWeightsInteger) {
+          dt_config->mutable_sparse_oblique_split()->mutable_integer();
         } else {
           return absl::InvalidArgumentError(absl::StrCat(
               "Unknown value for parameter ",
               kHParamSplitAxisSparseObliqueWeights, ". Possible values are: ",
-              kHParamSplitAxisSparseObliqueWeightsBinary, " and ",
-              kHParamSplitAxisSparseObliqueWeightsContinuous, "."));
+              kHParamSplitAxisSparseObliqueWeightsBinary, ", ",
+              kHParamSplitAxisSparseObliqueWeightsContinuous, ", ",
+              kHParamSplitAxisSparseObliqueWeightsPowerOfTwo, "and",
+              kHParamSplitAxisSparseObliqueWeightsInteger, "."));
         }
       } else {
         return absl::InvalidArgumentError(
             absl::StrCat(kHParamSplitAxisSparseObliqueWeights,
                          " only works with sparse oblique trees "
                          "(split_axis=SPARSE_OBLIQUE)"));
+      }
+    }
+  }
+
+  {
+    const auto hparam = generic_hyper_params->Get(
+        kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMinExponent);
+    if (hparam.has_value()) {
+      const auto hparam_value = hparam.value().value().integer();
+      if (dt_config->has_sparse_oblique_split() &&
+          dt_config->sparse_oblique_split().has_power_of_two()) {
+        dt_config->mutable_sparse_oblique_split()
+            ->mutable_power_of_two()
+            ->set_min_exponent(hparam_value);
+      } else {
+        return absl::InvalidArgumentError(absl::StrCat(
+            kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMinExponent,
+            " only works with sparse oblique trees "
+            "(`split_axis=SPARSE_OBLIQUE`) and power of two weights "
+            "(`sparse_oblique_weights=POWER_OF_TWO`)"));
+      }
+    }
+  }
+
+  {
+    const auto hparam = generic_hyper_params->Get(
+        kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMaxExponent);
+    if (hparam.has_value()) {
+      const auto hparam_value = hparam.value().value().integer();
+      if (dt_config->has_sparse_oblique_split() &&
+          dt_config->sparse_oblique_split().has_power_of_two()) {
+        dt_config->mutable_sparse_oblique_split()
+            ->mutable_power_of_two()
+            ->set_max_exponent(hparam_value);
+      } else {
+        return absl::InvalidArgumentError(absl::StrCat(
+            kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMaxExponent,
+            " only works with sparse oblique trees "
+            "(`split_axis=SPARSE_OBLIQUE`) and power of two weights "
+            "(`sparse_oblique_weights=POWER_OF_TWO`)"));
+      }
+    }
+  }
+
+  {
+    const auto hparam = generic_hyper_params->Get(
+        kHParamSplitAxisSparseObliqueWeightsIntegerMinimum);
+    if (hparam.has_value()) {
+      const auto hparam_value = hparam.value().value().integer();
+      if (dt_config->has_sparse_oblique_split() &&
+          dt_config->sparse_oblique_split().has_integer()) {
+        dt_config->mutable_sparse_oblique_split()
+            ->mutable_integer()
+            ->set_minimum(hparam_value);
+      } else {
+        return absl::InvalidArgumentError(absl::StrCat(
+            kHParamSplitAxisSparseObliqueWeightsIntegerMinimum,
+            " only works with sparse oblique trees "
+            "(`split_axis=SPARSE_OBLIQUE`) and integer weights "
+            "(`sparse_oblique_weights=INTEGER`)"));
+      }
+    }
+  }
+
+  {
+    const auto hparam = generic_hyper_params->Get(
+        kHParamSplitAxisSparseObliqueWeightsIntegerMaximum);
+    if (hparam.has_value()) {
+      const auto hparam_value = hparam.value().value().integer();
+      if (dt_config->has_sparse_oblique_split() &&
+          dt_config->sparse_oblique_split().has_integer()) {
+        dt_config->mutable_sparse_oblique_split()
+            ->mutable_integer()
+            ->set_maximum(hparam_value);
+      } else {
+        return absl::InvalidArgumentError(absl::StrCat(
+            kHParamSplitAxisSparseObliqueWeightsIntegerMaximum,
+            " only works with sparse oblique trees "
+            "(`split_axis=SPARSE_OBLIQUE`) and integer weights "
+            "(`sparse_oblique_weights=INTEGER`)"));
       }
     }
   }

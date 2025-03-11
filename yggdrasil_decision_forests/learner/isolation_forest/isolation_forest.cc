@@ -760,7 +760,13 @@ IsolationForestLearner::GetGenericHyperParameterSpecification() const {
       decision_tree::kHParamSplitAxis,
       decision_tree::kHParamSplitAxisSparseObliqueProjectionDensityFactor,
       decision_tree::kHParamSplitAxisSparseObliqueNormalization,
-      decision_tree::kHParamSplitAxisSparseObliqueWeights};
+      decision_tree::kHParamSplitAxisSparseObliqueWeights,
+      decision_tree::kHParamSplitAxisSparseObliqueMaxNumFeatures,
+      decision_tree::kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMinExponent,
+      decision_tree::kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMaxExponent,
+      decision_tree::kHParamSplitAxisSparseObliqueWeightsIntegerMinimum,
+      decision_tree::kHParamSplitAxisSparseObliqueWeightsIntegerMaximum,
+  };
   // Remove not yet implemented hyperparameters
   // TODO: b/345425508 - Implement more hyperparameters for isolation forests.
   absl::flat_hash_set<std::string> invalid_decision_tree_hyperparameters = {

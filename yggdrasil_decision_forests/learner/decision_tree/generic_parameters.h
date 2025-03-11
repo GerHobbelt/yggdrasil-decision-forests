@@ -74,6 +74,17 @@ constexpr char kHParamSplitAxisSparseObliqueWeights[] =
     "sparse_oblique_weights";
 constexpr char kHParamSplitAxisSparseObliqueWeightsBinary[] = "BINARY";
 constexpr char kHParamSplitAxisSparseObliqueWeightsContinuous[] = "CONTINUOUS";
+constexpr char kHParamSplitAxisSparseObliqueWeightsPowerOfTwo[] =
+    "POWER_OF_TWO";
+constexpr char kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMinExponent[] =
+    "sparse_oblique_weights_power_of_two_min_exponent";
+constexpr char kHParamSplitAxisSparseObliqueWeightsPowerOfTwoMaxExponent[] =
+    "sparse_oblique_weights_power_of_two_max_exponent";
+constexpr char kHParamSplitAxisSparseObliqueWeightsInteger[] = "INTEGER";
+constexpr char kHParamSplitAxisSparseObliqueWeightsIntegerMinimum[] =
+    "sparse_oblique_weights_integer_minimum";
+constexpr char kHParamSplitAxisSparseObliqueWeightsIntegerMaximum[] =
+    "sparse_oblique_weights_integer_maximum";
 
 constexpr char kHParamSplitAxisSparseObliqueNormalization[] =
     "sparse_oblique_normalization";
@@ -86,6 +97,9 @@ constexpr char kHParamSplitAxisMhldObliqueMaxNumAttributes[] =
     "mhld_oblique_max_num_attributes";
 constexpr char kHParamSplitAxisMhldObliqueSampleAttributes[] =
     "mhld_oblique_sample_attributes";
+
+constexpr char kHParamSplitAxisSparseObliqueMaxNumFeatures[] =
+    "sparse_oblique_max_num_features";
 
 constexpr char kHParamSortingStrategy[] = "sorting_strategy";
 constexpr char kHParamSortingStrategyInNode[] = "IN_NODE";

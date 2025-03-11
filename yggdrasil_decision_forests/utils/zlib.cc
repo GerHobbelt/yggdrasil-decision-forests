@@ -23,8 +23,8 @@
 #include <cstring>
 #include <memory>
 #include <string>
-#include <utility>
 
+#include "absl/base/nullability.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
@@ -40,10 +40,9 @@
 namespace yggdrasil_decision_forests::utils {
 
 absl::StatusOr<std::unique_ptr<GZipInputByteStream>>
-GZipInputByteStream::Create(std::unique_ptr<utils::InputByteStream>&& stream,
+GZipInputByteStream::Create(absl::Nonnull<utils::InputByteStream*> stream,
                             size_t buffer_size) {
-  auto gz_stream =
-      std::make_unique<GZipInputByteStream>(std::move(stream), buffer_size);
+  auto gz_stream = std::make_unique<GZipInputByteStream>(stream, buffer_size);
   std::memset(&gz_stream->deflate_stream_, 0,
               sizeof(gz_stream->deflate_stream_));
   if (inflateInit2(&gz_stream->deflate_stream_, 16 + MAX_WBITS) != Z_OK) {
@@ -53,9 +52,9 @@ GZipInputByteStream::Create(std::unique_ptr<utils::InputByteStream>&& stream,
   return gz_stream;
 }
 
-GZipInputByteStream::GZipInputByteStream(
-    std::unique_ptr<utils::InputByteStream>&& stream, size_t buffer_size)
-    : buffer_size_(buffer_size), stream_(std::move(stream)) {
+GZipInputByteStream::GZipInputByteStream(utils::InputByteStream* stream,
+                                         size_t buffer_size)
+    : buffer_size_(buffer_size), stream_(stream) {
   input_buffer_.resize(buffer_size_);
   output_buffer_.resize(buffer_size_);
 }
@@ -147,18 +146,20 @@ absl::Status GZipInputByteStream::CloseDeflateStream() {
 }
 
 absl::StatusOr<std::unique_ptr<GZipOutputByteStream>>
-GZipOutputByteStream::Create(std::unique_ptr<utils::OutputByteStream>&& stream,
-                             int compression_level, size_t buffer_size) {
+GZipOutputByteStream::Create(absl::Nonnull<utils::OutputByteStream*> stream,
+                             int compression_level, size_t buffer_size,
+                             bool raw_deflate) {
   if (compression_level != Z_DEFAULT_COMPRESSION) {
     STATUS_CHECK_GT(compression_level, Z_NO_COMPRESSION);
     STATUS_CHECK_LT(compression_level, Z_BEST_COMPRESSION);
   }
-  auto gz_stream =
-      std::make_unique<GZipOutputByteStream>(std::move(stream), buffer_size);
+  auto gz_stream = std::make_unique<GZipOutputByteStream>(stream, buffer_size);
   std::memset(&gz_stream->deflate_stream_, 0,
               sizeof(gz_stream->deflate_stream_));
+  // Note: A negative window size indicate to use the raw deflate algorithm (!=
+  // zlib or gzip).
   if (deflateInit2(&gz_stream->deflate_stream_, compression_level, Z_DEFLATED,
-                   MAX_WBITS + 16,
+                   raw_deflate ? -15 : (MAX_WBITS + 16),
                    /*memLevel=*/8,  // 8 is the recommended default
                    Z_DEFAULT_STRATEGY) != Z_OK) {
     return absl::InternalError("Cannot initialize gzip stream");
@@ -167,9 +168,9 @@ GZipOutputByteStream::Create(std::unique_ptr<utils::OutputByteStream>&& stream,
   return gz_stream;
 }
 
-GZipOutputByteStream::GZipOutputByteStream(
-    std::unique_ptr<utils::OutputByteStream>&& stream, size_t buffer_size)
-    : buffer_size_(buffer_size), stream_(std::move(stream)) {
+GZipOutputByteStream::GZipOutputByteStream(utils::OutputByteStream* stream,
+                                           size_t buffer_size)
+    : buffer_size_(buffer_size), stream_(*stream) {
   output_buffer_.resize(buffer_size_);
 }
 
@@ -212,7 +213,7 @@ absl::Status GZipOutputByteStream::WriteImpl(absl::string_view chunk,
     const size_t compressed_bytes = buffer_size_ - deflate_stream_.avail_out;
 
     if (compressed_bytes > 0) {
-      RETURN_IF_ERROR(stream_->Write(absl::string_view{
+      RETURN_IF_ERROR(stream_.Write(absl::string_view{
           reinterpret_cast<char*>(output_buffer_.data()), compressed_bytes}));
     }
 
@@ -226,16 +227,15 @@ absl::Status GZipOutputByteStream::WriteImpl(absl::string_view chunk,
 
 absl::Status GZipOutputByteStream::Close() {
   RETURN_IF_ERROR(CloseInflateStream());
-  if (stream_) {
-    return stream_->Close();
-  }
   return absl::OkStatus();
 }
+
+absl::Status GZipOutputByteStream::Flush() { return WriteImpl("", true); }
 
 absl::Status GZipOutputByteStream::CloseInflateStream() {
   if (deflate_stream_is_allocated_) {
     deflate_stream_is_allocated_ = false;
-    RETURN_IF_ERROR(WriteImpl("", true));
+    RETURN_IF_ERROR(Flush());
     if (deflateEnd(&deflate_stream_) != Z_OK) {
       return absl::InternalError("Cannot close deflate");
     }
@@ -244,7 +244,7 @@ absl::Status GZipOutputByteStream::CloseInflateStream() {
 }
 
 absl::Status Inflate(absl::string_view input, std::string* output,
-                     std::string* working_buffer) {
+                     std::string* working_buffer, bool raw_deflate) {
   if (working_buffer->size() < 1024) {
     return absl::InvalidArgumentError(
         "worker buffer should be at least 1024 bytes");
@@ -253,30 +253,28 @@ absl::Status Inflate(absl::string_view input, std::string* output,
   std::memset(&stream, 0, sizeof(stream));
   // Note: A negative window size indicate to use the raw deflate algorithm (!=
   // zlib or gzip).
-  if (inflateInit2(&stream, -15) != Z_OK) {
+  if (inflateInit2(&stream, raw_deflate ? -15 : (MAX_WBITS + 16)) != Z_OK) {
     return absl::InternalError("Cannot initialize gzip stream");
   }
   stream.next_in = reinterpret_cast<const Bytef*>(input.data());
   stream.avail_in = input.size();
 
-  while (true) {
+  int zlib_error;
+  do {
     stream.next_out = reinterpret_cast<Bytef*>(&(*working_buffer)[0]);
     stream.avail_out = working_buffer->size();
-    const auto zlib_error = inflate(&stream, Z_NO_FLUSH);
+    zlib_error = inflate(&stream, Z_NO_FLUSH);
     if (zlib_error != Z_OK && zlib_error != Z_STREAM_END) {
       inflateEnd(&stream);
       return absl::InternalError(absl::StrCat("Internal error", zlib_error));
     }
-    if (stream.avail_out == 0) {
-      break;
-    }
     const size_t produced_bytes = working_buffer->size() - stream.avail_out;
-    absl::StrAppend(output,
-                    absl::string_view{working_buffer->data(), produced_bytes});
-    if (zlib_error == Z_STREAM_END) {
-      break;
+    if (produced_bytes != 0) {
+      absl::StrAppend(
+          output, absl::string_view{working_buffer->data(), produced_bytes});
     }
-  }
+  } while (zlib_error != Z_STREAM_END);
+
   inflateEnd(&stream);
 
   return absl::OkStatus();

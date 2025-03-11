@@ -23,9 +23,13 @@
 #include <optional>
 #include <random>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
+#include "absl/container/btree_set.h"
 #include "absl/log/log.h"
+#include "absl/random/distributions.h"
+#include "absl/random/random.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/types/span.h"
@@ -673,13 +677,37 @@ void SampleProjection(const absl::Span<const int>& features,
   projection->reserve(projection_density * features.size());
   std::uniform_real_distribution<float> unif01;
   std::uniform_real_distribution<float> unif1m1(-1.f, 1.f);
+  const auto& oblique_config = dt_config.sparse_oblique_split();
 
   const auto gen_weight = [&](const int feature) -> float {
     float weight = unif1m1(*random);
-    if (dt_config.sparse_oblique_split().has_binary() ||
-        dt_config.sparse_oblique_split().weights_case() ==
-            dt_config.sparse_oblique_split().WEIGHTS_NOT_SET) {
-      weight = (weight >= 0) ? 1.f : -1.f;
+    switch (oblique_config.weights_case()) {
+      case (proto::DecisionTreeTrainingConfig::SparseObliqueSplit::WeightsCase::
+                kBinary): {
+        weight = (weight >= 0) ? 1.f : -1.f;
+        break;
+      }
+      case (proto::DecisionTreeTrainingConfig::SparseObliqueSplit::WeightsCase::
+                kPowerOfTwo): {
+        float sign = (weight >= 0) ? 1.f : -1.f;
+        int exponent =
+            absl::Uniform<int>(absl::IntervalClosed, *random,
+                               oblique_config.power_of_two().min_exponent(),
+                               oblique_config.power_of_two().max_exponent());
+        weight = sign * std::pow(2, exponent);
+        break;
+      }
+      case (proto::DecisionTreeTrainingConfig::SparseObliqueSplit::WeightsCase::
+                kInteger): {
+        weight = absl::Uniform(absl::IntervalClosed, *random,
+                               oblique_config.integer().minimum(),
+                               oblique_config.integer().maximum());
+        break;
+      }
+      default: {
+        // Return continuous weights.
+        break;
+      }
     }
 
     if (config_link.per_columns_size() > 0 &&
@@ -690,13 +718,13 @@ void SampleProjection(const absl::Span<const int>& features,
       if (direction_increasing == (weight < 0)) {
         weight = -weight;
       }
-      // As soon as one selected feature is monotonic, the oblique split becomes
-      // monotonic.
+      // As soon as one selected feature is monotonic, the oblique split
+      // becomes monotonic.
       *monotonic_direction = 1;
     }
 
     const auto& spec = data_spec.columns(feature).numerical();
-    switch (dt_config.sparse_oblique_split().normalization()) {
+    switch (oblique_config.normalization()) {
       case proto::DecisionTreeTrainingConfig::SparseObliqueSplit::NONE:
         return weight;
       case proto::DecisionTreeTrainingConfig::SparseObliqueSplit::
@@ -720,6 +748,31 @@ void SampleProjection(const absl::Span<const int>& features,
          /*.weight =*/1.f});
   } else if (projection->size() == 1) {
     projection->front().weight = 1.f;
+  }
+
+  int max_num_features = dt_config.sparse_oblique_split().max_num_features();
+  int cur_num_projections = projection->size();
+
+  if (max_num_features > 0 && cur_num_projections > max_num_features) {
+    internal::Projection resampled_projection;
+    resampled_projection.reserve(max_num_features);
+    // For a small number of features, a boolean vector is more efficient.
+    // Re-evaluate if this becomes a bottleneck.
+    absl::btree_set<size_t> sampled_features;
+    // Floyd's sampling algorithm.
+    for (size_t j = cur_num_projections - max_num_features;
+         j < cur_num_projections; j++) {
+      size_t t = absl::Uniform<size_t>(*random, 0, j + 1);
+      if (!sampled_features.insert(t).second) {
+        // t was already sampled, so insert j instead.
+        sampled_features.insert(j);
+        resampled_projection.push_back((*projection)[j]);
+      } else {
+        // t was not yet sampled.
+        resampled_projection.push_back((*projection)[t]);
+      }
+    }
+    *projection = std::move(resampled_projection);
   }
 }
 

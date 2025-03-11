@@ -27,6 +27,7 @@
 #include "absl/log/log.h"
 #include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
+#include "yggdrasil_decision_forests/utils/bytestream.h"
 #include "yggdrasil_decision_forests/utils/filesystem.h"
 #include "yggdrasil_decision_forests/utils/logging.h"
 #include "yggdrasil_decision_forests/utils/test.h"
@@ -46,7 +47,7 @@ std::string HelloPath() {
 
 TEST(GZip, ReadAll) {
   auto file_stream = file::OpenInputFile(HelloPath()).value();
-  auto stream = GZipInputByteStream::Create(std::move(file_stream)).value();
+  auto stream = GZipInputByteStream::Create(file_stream.get()).value();
   auto read_content = stream->ReadAll().value();
   EXPECT_OK(stream->Close());
   EXPECT_EQ("hello", read_content);
@@ -54,7 +55,7 @@ TEST(GZip, ReadAll) {
 
 TEST(GZip, ReadUnit) {
   auto file_stream = file::OpenInputFile(HelloPath()).value();
-  auto stream = GZipInputByteStream::Create(std::move(file_stream)).value();
+  auto stream = GZipInputByteStream::Create(file_stream.get()).value();
   char buffer[10];
 
   int n = stream->ReadUpTo(buffer, 1).value();
@@ -119,33 +120,68 @@ TEST_P(GZipTestCaseTest, WriteAndRead) {
 
   {
     auto file_stream = file::OpenOutputFile(file_path).value();
-    auto stream = GZipOutputByteStream::Create(std::move(file_stream),
-                                               test_case.compression,
-                                               test_case.buffer_size)
-                      .value();
+    auto stream =
+        GZipOutputByteStream::Create(file_stream.get(), test_case.compression,
+                                     test_case.buffer_size)
+            .value();
     EXPECT_OK(stream->Write(content));
     EXPECT_OK(stream->Write(content));
     EXPECT_OK(stream->Close());
+    EXPECT_OK(file_stream->Close());
   }
 
   {
     auto file_stream = file::OpenInputFile(file_path).value();
-    auto stream = GZipInputByteStream::Create(std::move(file_stream),
-                                              test_case.buffer_size)
-                      .value();
+    auto stream =
+        GZipInputByteStream::Create(file_stream.get(), test_case.buffer_size)
+            .value();
     auto read_content = stream->ReadAll().value();
     EXPECT_OK(stream->Close());
+    EXPECT_OK(file_stream->Close());
     EXPECT_EQ(content + content, read_content);
   }
 }
 
-TEST(RawDeflate, Base) {
+TEST(RawInflate, Base) {
   const auto input =
       absl::HexStringToBytes("05804109000008c4aa184ec1c7e0c08ff5c70ea43e470b");
   std::string output;
   std::string working_buffer(1024, 0);
-  ASSERT_OK(Inflate(input, &output, &working_buffer));
+  ASSERT_OK(Inflate(input, &output, &working_buffer, /*raw_deflate=*/true));
   EXPECT_EQ(output, "hello world");
+}
+
+TEST(RawInflate, ExceedBuffer) {
+  // Create a large chunk of data (need to be larger than the
+  // decompress buffer for this test to make sense).
+  std::string raw_data;
+  raw_data.reserve(13'000'000);
+  // Write 13MB of non-compressed data.
+  for (int i = 0; i < 1'000'000; i++) {
+    absl::StrAppend(&raw_data, "13 characters");
+  }
+
+  std::string compressed_data;
+  {
+    // Compress the data.
+    auto raw_stream = std::make_unique<StringOutputByteStream>();
+    auto stream = GZipOutputByteStream::Create(raw_stream.get(), 8, 1024 * 1024,
+                                               /*raw_deflate=*/true)
+                      .value();
+    EXPECT_OK(stream->Write(raw_data));
+    EXPECT_OK(stream->Close());
+    EXPECT_OK(raw_stream->Close());
+
+    compressed_data = raw_stream->ToString();
+    LOG(INFO) << "Compressed data size:" << compressed_data.size();
+  }
+
+  std::string output;
+  // The buffer is smaller than the decompressed data.
+  std::string working_buffer(1024 * 1024, 0);
+  ASSERT_OK(
+      Inflate(compressed_data, &output, &working_buffer, /*raw_deflate=*/true));
+  EXPECT_EQ(output, raw_data);
 }
 
 }  // namespace
