@@ -141,9 +141,20 @@ inline double Mean(const proto::NormalDistributionDouble& dist) {
 // Confusion matrix between a binary attribute and a normal distribution.
 class BinaryToNormalDistributionDouble {
  public:
+  BinaryToNormalDistributionDouble() {}
+
+  BinaryToNormalDistributionDouble(NormalDistributionDouble neg,
+                                   NormalDistributionDouble pos)
+      : split_{neg, pos} {}
+
   // Add an entry.
   void Add(bool bool_dim, double num_dim, const double weight = 1.) {
     split_[bool_dim].Add(num_dim, weight);
+  }
+
+  void Add(const BinaryToNormalDistributionDouble& other) {
+    split_[0].Add(other.neg());
+    split_[1].Add(other.pos());
   }
 
   // Variance i.e. weighted sum of the variance of the normal distributions.
