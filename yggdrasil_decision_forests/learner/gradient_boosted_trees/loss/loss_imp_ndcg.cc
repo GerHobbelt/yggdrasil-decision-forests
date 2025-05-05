@@ -17,12 +17,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
 #include <iterator>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "absl/log/check.h"
+#include "absl/log/log.h"
 #include "absl/status/status.h"
 #include "absl/status/statusor.h"
 #include "absl/strings/str_cat.h"
@@ -37,10 +40,145 @@
 #include "yggdrasil_decision_forests/model/abstract_model.pb.h"
 #include "yggdrasil_decision_forests/utils/concurrency.h"
 #include "yggdrasil_decision_forests/utils/random.h"
+#include "yggdrasil_decision_forests/utils/status_macros.h"
+#include "yggdrasil_decision_forests/utils/synchronization_primitives.h"
 
 namespace yggdrasil_decision_forests {
 namespace model {
 namespace gradient_boosted_trees {
+namespace {
+
+absl::Status UpdateGradientsSingleThread(
+    const absl::Span<const float> labels,
+    const absl::Span<const float> predictions,
+    const absl::Span<const RankingGroupsIndices::Group>& groups,
+    const int ndcg_truncation, const float lambda_loss,
+    const bool gradient_use_non_normalized_dcg, const int64_t seed,
+    absl::Span<float> gradient_data, absl::Span<float> hessian_data) {
+  utils::RandomEngine local_random(seed);
+  DCHECK_EQ(gradient_data.size(), hessian_data.size());
+
+  metric::NDCGCalculator ndcg_calculator(ndcg_truncation);
+
+  const float lambda_loss_squared = lambda_loss * lambda_loss;
+
+  // "pred_and_in_group_idx[j].first" is the prediction for the example
+  // "group[pred_and_in_group_idx[j].second].example_idx".
+  std::vector<std::pair<float, int>> pred_and_in_group_idx;
+  for (const auto& group : groups) {
+    // For each group item, extract its prediction and its original example_idx.
+    // Groups are sorted by relevance (ground truth).
+    const int group_size = group.items.size();
+    pred_and_in_group_idx.resize(group_size);
+    for (int item_idx = 0; item_idx < group_size; item_idx++) {
+      pred_and_in_group_idx[item_idx] = {
+          predictions[group.items[item_idx].example_idx], item_idx};
+    }
+
+    // NDCG normalization term.
+    float utility_normalization_factor = 1.;
+    if (!gradient_use_non_normalized_dcg) {
+      const int max_rank = std::min(ndcg_truncation, group_size);
+      float max_ndcg = 0;
+      for (int rank = 0; rank < max_rank; rank++) {
+        max_ndcg += ndcg_calculator.Term(group.items[rank].relevance, rank);
+      }
+      utility_normalization_factor = 1.f / max_ndcg;
+    }
+
+    // Sort pred_and_in_group_idx by decreasing predicted value.
+    // Note: We shuffle the predictions so that the expected gradient value is
+    // aligned with the metric value with ties taken into account (which is
+    // too expensive to do here).
+    std::sort(pred_and_in_group_idx.begin(), pred_and_in_group_idx.end(),
+              [](const auto& a, const auto& b) { return a.first > b.first; });
+    auto it = pred_and_in_group_idx.begin();
+    while (it != pred_and_in_group_idx.end()) {
+      auto next_it = std::next(it);
+      while (next_it != pred_and_in_group_idx.end() &&
+             it->first == next_it->first) {
+        next_it++;
+      }
+      std::shuffle(it, next_it, local_random);
+      it = next_it;
+    }
+
+    // Two items whose ground truth is above the truncation threshold will not
+    // impact the gradient if swapped.
+    const size_t maximum_relevant_item_idx =
+        std::min(group_size, ndcg_truncation);
+
+    // Compute the gradients and hessians: For every item, compute the force
+    // (i.e. lambdas) to apply on the other items.
+    for (int item_1_idx = 0; item_1_idx < maximum_relevant_item_idx;
+         item_1_idx++) {
+      const float pred_1 = pred_and_in_group_idx[item_1_idx].first;
+      const int in_group_idx_1 = pred_and_in_group_idx[item_1_idx].second;
+      const float relevance_1 = group.items[in_group_idx_1].relevance;
+      const auto example_1_idx = group.items[in_group_idx_1].example_idx;
+
+      // Accumulator for the gradient and second order derivative of the
+      // example `example_1_idx`.
+      float& grad_1 = gradient_data[example_1_idx];
+      float& second_order_1 = hessian_data[example_1_idx];
+
+      // Iterate over all items that should be ranked lower than item_1. In the
+      // notation from the paper, item_1 ▷ item_2.
+      for (int item_2_idx = item_1_idx + 1; item_2_idx < group_size;
+           item_2_idx++) {
+        const float pred_2 = pred_and_in_group_idx[item_2_idx].first;
+        const int in_group_idx_2 = pred_and_in_group_idx[item_2_idx].second;
+        const float relevance_2 = group.items[in_group_idx_2].relevance;
+        const auto example_2_idx = group.items[in_group_idx_2].example_idx;
+
+        // Skip examples with the same relevance value.
+        if (relevance_1 == relevance_2) {
+          continue;
+        }
+
+        // "delta_utility" corresponds to "Z_{i,j}" in the paper.
+        // Recall that item_1_idx < ndcg_truncation.
+        //
+        double delta_utility = ndcg_calculator.Term(relevance_2, item_1_idx) -
+                               ndcg_calculator.Term(relevance_1, item_1_idx);
+
+        if (item_2_idx < ndcg_truncation) {
+          delta_utility += ndcg_calculator.Term(relevance_1, item_2_idx) -
+                           ndcg_calculator.Term(relevance_2, item_2_idx);
+        }
+        delta_utility = std::abs(delta_utility) * utility_normalization_factor;
+
+        // If the current prediction has item_1 and item_2 ordered correctly,
+        // i.e. in_group_idx_1 >= in_group_idx_2, apply them positively,
+        // otherwise, multiply with -1.
+        const float sign = 2.f * (in_group_idx_1 >= in_group_idx_2) - 1.f;
+        // "sigmoid" corresponds to "rho_{i,j}" in the paper.
+        // We use `sign` to negate the subtraction `pred_1 - pred_2`.
+        const float sigmoid =
+            1.f / (1.f + std::exp(-lambda_loss * sign * (pred_1 - pred_2)));
+        const float unit_grad = sign * (-lambda_loss) * sigmoid * delta_utility;
+        const float unit_second_order =
+            delta_utility * sigmoid * (1.f - sigmoid) * lambda_loss_squared;
+
+        // Update the gradients of item_1.
+        grad_1 += unit_grad;
+        second_order_1 += unit_second_order;
+
+        DCheckIsFinite(grad_1);
+        DCheckIsFinite(second_order_1);
+
+        // Update the gradients of item_2.
+        gradient_data[example_2_idx] -= unit_grad;
+        hessian_data[example_2_idx] += unit_second_order;
+        DCheckIsFinite(gradient_data[example_2_idx]);
+        DCheckIsFinite(hessian_data[example_2_idx]);
+      }
+    }
+  }
+  return absl::OkStatus();
+}
+
+}  // namespace
 
 absl::Status NDCGLoss::Status() const {
   if (task_ != model::proto::Task::RANKING) {
@@ -73,140 +211,59 @@ absl::Status NDCGLoss::UpdateGradients(
     const RankingGroupsIndices* ranking_index, GradientDataRef* gradients,
     utils::RandomEngine* random,
     utils::concurrency::ThreadPool* thread_pool) const {
-  // TODO: Implement thread_pool.
-
+  STATUS_CHECK_EQ(gradients->size(), 1);
   std::vector<float>& gradient_data = *(*gradients)[0].gradient;
   std::vector<float>& hessian_data = *(*gradients)[0].hessian;
-  DCHECK_EQ(gradient_data.size(), hessian_data.size());
-
-  metric::NDCGCalculator ndcg_calculator(ndcg_truncation_);
-
-  const float lambda_loss = gbt_config_.lambda_loss();
-  const float lambda_loss_squared = lambda_loss * lambda_loss;
-
+  STATUS_CHECK_EQ(gradient_data.size(), hessian_data.size());
   // Reset gradient accumulators.
   std::fill(gradient_data.begin(), gradient_data.end(), 0.f);
   std::fill(hessian_data.begin(), hessian_data.end(), 0.f);
 
-  // "pred_and_in_ground_idx[j].first" is the prediction for the example
-  // "group[pred_and_in_ground_idx[j].second].example_idx".
-  std::vector<std::pair<float, int>> pred_and_in_ground_idx;
-  for (const auto& group : ranking_index->groups()) {
-    // Extract predictions.
-    const int group_size = group.items.size();
-    pred_and_in_ground_idx.resize(group_size);
-    for (int item_idx = 0; item_idx < group_size; item_idx++) {
-      pred_and_in_ground_idx[item_idx] = {
-          predictions[group.items[item_idx].example_idx], item_idx};
+  if (thread_pool == nullptr) {
+    RETURN_IF_ERROR(UpdateGradientsSingleThread(
+        labels, predictions, absl::MakeConstSpan(ranking_index->groups()),
+        ndcg_truncation_, gbt_config_.lambda_loss(),
+        gbt_config_.lambda_mart_ndcg().gradient_use_non_normalized_dcg(),
+        (*random)(), absl::Span<float>(gradient_data),
+        absl::Span<float>(hessian_data)));
+    return absl::OkStatus();
+  } else {
+    absl::Status global_status;
+    utils::concurrency::Mutex global_mutex;
+    std::vector<int64_t> random_seeds(thread_pool->num_threads());
+    for (size_t i = 0; i < random_seeds.size(); i++) {
+      random_seeds[i] = (*random)();
     }
-
-    // NDCG normalization term.
-    // Note: At this point, "pred_and_in_ground_idx" is sorted by relevance
-    // i.e. ground truth.
-    float utility_norm_factor = 1.;
-    if (!gbt_config_.lambda_mart_ndcg().gradient_use_non_normalized_dcg()) {
-      const int max_rank = std::min(ndcg_truncation_, group_size);
-      float max_ndcg = 0;
-      for (int rank = 0; rank < max_rank; rank++) {
-        max_ndcg += ndcg_calculator.Term(group.items[rank].relevance, rank);
-      }
-      utility_norm_factor = 1.f / max_ndcg;
-    }
-
-    // Sort by decreasing predicted value.
-    // Note: We shuffle the predictions so that the expected gradient value is
-    // aligned with the metric value with ties taken into account (which is
-    // too expensive to do here).
-    std::sort(pred_and_in_ground_idx.begin(), pred_and_in_ground_idx.end(),
-              [](const auto& a, const auto& b) { return a.first > b.first; });
-
-    auto it = pred_and_in_ground_idx.begin();
-    while (it != pred_and_in_ground_idx.end()) {
-      auto next_it = std::next(it);
-      while (next_it != pred_and_in_ground_idx.end() &&
-             it->first == next_it->first) {
-        next_it++;
-      }
-      std::shuffle(it, next_it, *random);
-      it = next_it;
-    }
-
-    const int num_pred_and_in_ground = pred_and_in_ground_idx.size();
-
-    // Compute the "force" that each item apply on each other items.
-    for (int item_1_idx = 0; item_1_idx < num_pred_and_in_ground;
-         item_1_idx++) {
-      const float pred_1 = pred_and_in_ground_idx[item_1_idx].first;
-      const int in_ground_idx_1 = pred_and_in_ground_idx[item_1_idx].second;
-      const float relevance_1 = group.items[in_ground_idx_1].relevance;
-      const auto example_1_idx = group.items[in_ground_idx_1].example_idx;
-
-      // Accumulator for the gradient and second order derivative of the
-      // example
-      // "group[pred_and_in_ground_idx[item_1_idx].second].example_idx".
-      float& grad_1 = gradient_data[example_1_idx];
-      float& second_order_1 = hessian_data[example_1_idx];
-
-      for (int item_2_idx = item_1_idx + 1; item_2_idx < num_pred_and_in_ground;
-           item_2_idx++) {
-        const float pred_2 = pred_and_in_ground_idx[item_2_idx].first;
-        const int in_ground_idx_2 = pred_and_in_ground_idx[item_2_idx].second;
-        const float relevance_2 = group.items[in_ground_idx_2].relevance;
-        const auto example_2_idx = group.items[in_ground_idx_2].example_idx;
-
-        // Skip examples with the same relevance value.
-        if (relevance_1 == relevance_2) {
-          continue;
-        }
-
-        // "delta_utility" corresponds to "Z_{i,j}" in the paper.
-        float delta_utility = 0;
-        if (item_1_idx < ndcg_truncation_) {
-          delta_utility += ndcg_calculator.Term(relevance_2, item_1_idx) -
-                           ndcg_calculator.Term(relevance_1, item_1_idx);
-        }
-        if (item_2_idx < ndcg_truncation_) {
-          delta_utility += ndcg_calculator.Term(relevance_1, item_2_idx) -
-                           ndcg_calculator.Term(relevance_2, item_2_idx);
-        }
-        delta_utility = std::abs(delta_utility) * utility_norm_factor;
-
-        // "sign" correspond to the sign in front of the lambda_{i,j} terms
-        // in the equation defining lambda_i, in section 7 of "From RankNet
-        // to LambdaRank to LambdaMART: An Overview".
-        // The "sign" is also used to reverse the {i,j} or {j,i} in the
-        // "lambda" term i.e. "s_i" and "s_j" in the sigmoid.
-
-        // sign = in_ground_idx_1 < in_ground_idx_2 ? +1.f : -1.f;
-        // signed_lambda_loss = sign * lambda_loss;
-
-        const float signed_lambda_loss =
-            lambda_loss -
-            2.f * lambda_loss * (in_ground_idx_1 >= in_ground_idx_2);
-
-        // "sigmoid" corresponds to "rho_{i,j}" in the paper.
-        const float sigmoid =
-            1.f / (1.f + std::exp(signed_lambda_loss * (pred_1 - pred_2)));
-
-        // "unit_grad" corresponds to "lambda_{i,j}" in the paper.
-        // Note: We want to minimize the loss function i.e. go in opposite
-        // side of the gradient.
-        const float unit_grad = signed_lambda_loss * sigmoid * delta_utility;
-        const float unit_second_order =
-            delta_utility * sigmoid * (1.f - sigmoid) * lambda_loss_squared;
-
-        grad_1 += unit_grad;
-        second_order_1 += unit_second_order;
-
-        DCheckIsFinite(grad_1);
-        DCheckIsFinite(second_order_1);
-
-        gradient_data[example_2_idx] -= unit_grad;
-        hessian_data[example_2_idx] += unit_second_order;
-      }
-    }
+    utils::concurrency::ConcurrentForLoop(
+        thread_pool->num_threads(), thread_pool, ranking_index->groups().size(),
+        [&labels, &predictions, ranking_index, &gradient_data, &hessian_data,
+         &random_seeds, lambda_loss = gbt_config_.lambda_loss(),
+         gradient_use_non_normalized_dcg =
+             gbt_config_.lambda_mart_ndcg().gradient_use_non_normalized_dcg(),
+         ndcg_truncation = this->ndcg_truncation_, &global_status,
+         &global_mutex](const size_t block_idx, const size_t begin_idx,
+                        const size_t end_idx) -> void {
+          {
+            utils::concurrency::MutexLock lock(&global_mutex);
+            if (!global_status.ok()) {
+              return;
+            }
+          }
+          absl::Status thread_status = UpdateGradientsSingleThread(
+              absl::MakeConstSpan(labels), absl::MakeConstSpan(predictions),
+              absl::MakeConstSpan(ranking_index->groups())
+                  .subspan(begin_idx, end_idx - begin_idx),
+              ndcg_truncation, lambda_loss, gradient_use_non_normalized_dcg,
+              random_seeds[block_idx], absl::MakeSpan(gradient_data),
+              absl::MakeSpan(hessian_data));
+          if (!thread_status.ok()) {
+            utils::concurrency::MutexLock lock(&global_mutex);
+            global_status.Update(thread_status);
+            return;
+          }
+        });
+    return global_status;
   }
-  return absl::OkStatus();
 }
 
 std::vector<std::string> NDCGLoss::SecondaryMetricNames() const {
