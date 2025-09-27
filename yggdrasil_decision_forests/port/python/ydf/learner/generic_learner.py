@@ -150,7 +150,7 @@ class GenericLearner(abc.ABC):
 
     This method is called automatically before training, but users may call it
     to fail early. It makes sense to call this method when changing manually the
-    hyper-paramters of the learner. This is a relatively advanced approach that
+    hyper-parameters of the learner. This is a relatively advanced approach that
     is not recommende (it is better to re-create the learner in most cases).
 
     Usage example:
