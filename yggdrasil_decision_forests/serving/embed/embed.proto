@@ -47,6 +47,12 @@ message Options {
   //
   // Enabling this option might increase the binary size.
   optional bool categorical_from_string = 7 [default = false];
+
+  // Which programming language should be produced.
+  oneof language {
+    CC cc = 8;
+    Java java = 9;
+  }
 }
 
 // Output of a classification model.
@@ -109,4 +115,10 @@ message Algorithm {
     // sometime be faster).
     ROUTING = 2;
   }
+}
+
+message CC {}
+
+message Java {
+  optional string package_name = 1 [default = "com.google.ydf"];
 }

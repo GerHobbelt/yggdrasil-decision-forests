@@ -15,7 +15,7 @@
 
 // Test the code to embed models.
 
-#include "yggdrasil_decision_forests/serving/embed/embed.h"
+#include "yggdrasil_decision_forests/serving/embed/cc_embed.h"
 
 #include <memory>
 #include <optional>
@@ -35,6 +35,8 @@
 #include "yggdrasil_decision_forests/model/decision_tree/decision_tree.pb.h"
 #include "yggdrasil_decision_forests/model/gradient_boosted_trees/gradient_boosted_trees.h"
 #include "yggdrasil_decision_forests/model/model_library.h"
+#include "yggdrasil_decision_forests/serving/embed/common.h"
+#include "yggdrasil_decision_forests/serving/embed/embed.h"
 #include "yggdrasil_decision_forests/serving/embed/embed.pb.h"
 #include "yggdrasil_decision_forests/utils/filesystem.h"
 #include "yggdrasil_decision_forests/utils/test.h"
@@ -99,7 +101,7 @@ TestData BuildToyTestData() {
   return TestData{.model = std::move(model)};
 };
 
-struct GoldenGeneratedHCase {
+struct GoldenGeneratedCCCase {
   std::string model_filename;
   std::string golden_filename;
   proto::Algorithm::Enum algorithm;
@@ -110,7 +112,7 @@ struct GoldenGeneratedHCase {
 
 // Compare the generated .h files against golden files.
 SIMPLE_PARAMETERIZED_TEST(
-    GoldenGeneratedH, GoldenGeneratedHCase,
+    GoldenGeneratedCC, GoldenGeneratedCCCase,
     {
         // GBT
         {
@@ -234,12 +236,13 @@ SIMPLE_PARAMETERIZED_TEST(
   }
 
   proto::Options options;
+  options.mutable_cc();
   options.set_algorithm(test_case.algorithm);
   options.set_categorical_from_string(test_case.categorical_from_string);
   if (test_case.output.has_value()) {
     options.set_classification_output(*test_case.output);
   }
-  ASSERT_OK_AND_ASSIGN(const auto embed, EmbedModelCC(*model, options));
+  ASSERT_OK_AND_ASSIGN(const auto embed, EmbedModel(*model, options));
   EXPECT_EQ(embed.size(), 1);
   EXPECT_TRUE(embed.contains("ydf_model.h"));
 
@@ -278,9 +281,11 @@ TEST(Process, ManualBinaryGBT) {
       stats.has_conditions
           [model::decision_tree::proto::Condition::kTrueValueCondition]);
 
+  proto::Options options;
+  options.mutable_cc();
   ASSERT_OK_AND_ASSIGN(
       const auto internal_options,
-      internal::ComputeInternalOptions(*test_data.model, *df, stats, {}));
+      internal::ComputeInternalOptions(*test_data.model, *df, stats, options));
   EXPECT_EQ(internal_options.feature_value_bytes, 2);
   EXPECT_EQ(internal_options.numerical_feature_is_float, false);
 
@@ -298,7 +303,6 @@ TEST(Process, ManualBinaryGBT) {
 
   EXPECT_EQ(internal_options.feature_index_bytes, 1);
   EXPECT_EQ(internal_options.tree_index_bytes, 1);
-  EXPECT_EQ(internal_options.node_index_bytes, 1);
   EXPECT_EQ(internal_options.node_offset_bytes, 1);
 }
 
@@ -321,15 +325,16 @@ TEST(Process, RealBinaryGBT) {
   EXPECT_TRUE(stats.is_binary_classification());
   EXPECT_EQ(stats.num_classification_classes, 2);
 
+  proto::Options options;
+  options.mutable_cc();
   ASSERT_OK_AND_ASSIGN(
       const auto internal_options,
-      internal::ComputeInternalOptions(*model, *df, stats, {}));
+      internal::ComputeInternalOptions(*model, *df, stats, options));
   EXPECT_EQ(internal_options.feature_value_bytes, 4);
   EXPECT_EQ(internal_options.numerical_feature_is_float, false);
 
   EXPECT_EQ(internal_options.feature_index_bytes, 1);
   EXPECT_EQ(internal_options.tree_index_bytes, 1);
-  EXPECT_EQ(internal_options.node_index_bytes, 2);
   EXPECT_EQ(internal_options.node_offset_bytes, 1);
 }
 
@@ -352,9 +357,11 @@ TEST(Process, RealMultiClassGBT) {
   EXPECT_FALSE(stats.is_binary_classification());
   EXPECT_EQ(stats.num_classification_classes, 3);
 
+  proto::Options options;
+  options.mutable_cc();
   ASSERT_OK_AND_ASSIGN(
       const auto internal_options,
-      internal::ComputeInternalOptions(*model, *df, stats, {}));
+      internal::ComputeInternalOptions(*model, *df, stats, options));
   EXPECT_EQ(internal_options.feature_value_bytes, 4);
   EXPECT_EQ(internal_options.numerical_feature_is_float, true);
 }
@@ -409,7 +416,7 @@ SIMPLE_PARAMETERIZED_TEST(
          "int16_t"},
     }) {
   const auto& test_case = GetParam();
-  internal::InternalOptions internal_options;
+  internal::CCInternalOptions internal_options;
   ASSERT_OK(internal::ComputeInternalOptionsOutput(
       test_case.stats, test_case.options, &internal_options));
   EXPECT_EQ(internal_options.output_type, test_case.expected_output_type);
@@ -417,7 +424,7 @@ SIMPLE_PARAMETERIZED_TEST(
 
 struct GenFeatureDefCase {
   dataset::proto::Column col_spec;
-  internal::InternalOptions internal_options;
+  internal::BaseInternalOptions base_internal_options;
   std::string expected_underlying_type;
   absl::optional<std::string> expected_default_value;
 };
@@ -466,9 +473,12 @@ SIMPLE_PARAMETERIZED_TEST(
          {}},
     }) {
   const auto& test_case = GetParam();
-  ASSERT_OK_AND_ASSIGN(
-      const auto value,
-      internal::GenFeatureDef(test_case.col_spec, test_case.internal_options));
+
+  internal::CCInternalOptions options;
+  static_cast<internal::BaseInternalOptions&>(options) =
+      test_case.base_internal_options;
+  ASSERT_OK_AND_ASSIGN(const auto value,
+                       internal::GenFeatureDef(test_case.col_spec, options));
   EXPECT_EQ(value.underlying_type, test_case.expected_underlying_type);
   EXPECT_EQ(value.default_value, test_case.expected_default_value);
 }
