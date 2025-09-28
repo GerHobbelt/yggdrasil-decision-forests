@@ -482,6 +482,60 @@ Use `model.describe()` for more details
     """
     raise NotImplementedError
 
+  def predict_shap(
+      self,
+      data: dataset.InputDataset,
+      *,
+      num_threads: Optional[int] = None,
+  ) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+    """Returns the SHAP value of the model for each example in the dataset.
+
+    Usage example:
+
+    ```python
+    import pandas as pd
+    import ydf
+
+    # Train model
+    train_ds = pd.read_csv("train.csv")
+    model = ydf.RandomForestLearner(label="label").train(train_ds)
+
+    # Computes the SHAP values on the test dataset.
+    test_ds = pd.read_csv("test.csv")
+    shap_values, initial_value = model.predict_shap(test_ds)
+    ```
+
+    The shap values (`shap_values`) is a dictionary mapping feature names to a
+    float32 Numpy array of shape [num examples, num output] or [num examples]
+    (if the model has a single output).
+
+    The second returned value `initial_value` is a float32 Numpy array of shape
+    [num output] or [] (if the model has a single output) with the initial
+    (a.k.a. offset predictions).
+
+    The prediction of the model (computed with `model.predict`) is equal to
+    the `initial_value` plus all the shape values `shap_values`. Note that for
+    models with an activation function (a.k.a. linkage funciton; e.g. sigmoid on
+    binary classification GBT models), the SHAP values are computed before the
+    activation function (e.g., on the logits on binary classification GBT
+    models).
+
+    The SHAP `initial_value` are generally not equal to the "initial prediction"
+    of some models (e.g. gradient boosted trees).
+
+    Args:
+      data: Dataset. Supported formats: VerticalDataset, (typed) path, list of
+        (typed) paths, Pandas DataFrame, Xarray Dataset, TensorFlow Dataset,
+        PyGrain DataLoader and Dataset (experimental, Linux only), dictionary of
+        string to NumPy array or lists. If the dataset contains the label
+        column, that column is ignored.
+      num_threads: Number of threads used to run the model.
+
+    Returns:
+      Dictionary of shape values and initial model values.
+    """
+    raise NotImplementedError("SHAP is not implemented for this model")
+
   @abc.abstractmethod
   def evaluate(
       self,
@@ -494,6 +548,7 @@ Use `model.describe()` for more details
       bootstrapping: Union[bool, int] = False,
       ndcg_truncation: int = 5,
       mrr_truncation: int = 5,
+      map_truncation: int = 5,
       evaluation_task: Optional[Task] = None,
       use_slow_engine: bool = False,
       num_threads: Optional[int] = None,
@@ -567,6 +622,8 @@ Use `model.describe()` for more details
         be truncated. Default to 5. Ignored for non-ranking models.
       mrr_truncation: Controls at which ranking position the MRR metric loss
         should be truncated. Default to 5. Ignored for non-ranking models.
+      map_truncation: Controls at which ranking position the MAP metric loss
+        should be truncated. Default to 5. Ignored for non-ranking models.
       evaluation_task: Deprecated. Use `task` instead.
       use_slow_engine: If true, uses the slow engine for making predictions. The
         slow engine of YDF is an order of magnitude slower than the other
@@ -633,6 +690,8 @@ Use `model.describe()` for more details
       num_bins: int = 50,
       partial_dependence_plot: bool = True,
       conditional_expectation_plot: bool = True,
+      permutation_variable_importance: bool = True,
+      shap_values: bool = True,
       permutation_variable_importance_rounds: int = 1,
       num_threads: Optional[int] = None,
       maximum_duration: Optional[float] = 20,
@@ -681,6 +740,8 @@ Use `model.describe()` for more details
         Expensive to compute.
       conditional_expectation_plot: Compute the conditional expectation plots
         a.k.a. CEP. Cheap to compute.
+      permutation_variable_importance: Compute permutation variable importances.
+      shap_values: Compute SHAP values based metrics.
       permutation_variable_importance_rounds: If >1, computes permutation
         variable importances using "permutation_variable_importance_rounds"
         rounds. The most rounds the more accurate the results. Using a single
@@ -1520,6 +1581,27 @@ class GenericCCModel(GenericModel):
       )
     return result
 
+  def predict_shap(
+      self,
+      data: dataset.InputDataset,
+      *,
+      num_threads: Optional[int] = None,
+  ) -> Tuple[Dict[str, np.ndarray], np.ndarray]:
+    if num_threads is None:
+      num_threads = concurrency.determine_optimal_num_threads(training=False)
+
+    with log.cc_log_context():
+      # The data spec contains the label / weights /  ranking group / uplift
+      # treatment column, but those are not required for making predictions.
+      ds = dataset.create_vertical_dataset(
+          data,
+          data_spec=self._model.data_spec(),
+          required_columns=self.input_feature_names(),
+      )
+      return self._model.PredictShap(
+          ds._dataset, num_threads=num_threads  # pylint: disable=protected-access
+      )
+
   def evaluate(
       self,
       data: dataset.InputDataset,
@@ -1531,6 +1613,7 @@ class GenericCCModel(GenericModel):
       bootstrapping: Union[bool, int] = False,
       ndcg_truncation: int = 5,
       mrr_truncation: int = 5,
+      map_truncation: int = 5,
       evaluation_task: Optional[Task] = None,
       use_slow_engine: bool = False,
       num_threads: Optional[int] = None,
@@ -1607,7 +1690,9 @@ class GenericCCModel(GenericModel):
           bootstrapping_samples=bootstrapping_samples,
           task=task._to_proto_type(),  # pylint: disable=protected-access
           ranking=metric_pb2.EvaluationOptions.Ranking(
-              ndcg_truncation=ndcg_truncation, mrr_truncation=mrr_truncation
+              ndcg_truncation=ndcg_truncation,
+              mrr_truncation=mrr_truncation,
+              map_truncation=map_truncation,
           )
           if task == Task.RANKING
           else None,
@@ -1648,6 +1733,8 @@ class GenericCCModel(GenericModel):
       num_bins: int = 50,
       partial_dependence_plot: bool = True,
       conditional_expectation_plot: bool = True,
+      permutation_variable_importance: bool = True,
+      shap_values: bool = True,
       permutation_variable_importance_rounds: int = 1,
       num_threads: Optional[int] = None,
       maximum_duration: Optional[float] = 20,
@@ -1658,7 +1745,7 @@ class GenericCCModel(GenericModel):
 
     enable_permutation_variable_importances = (
         permutation_variable_importance_rounds > 0
-    )
+    ) and permutation_variable_importance
     if (
         enable_permutation_variable_importances
         and self.task() == Task.ANOMALY_DETECTION
@@ -1694,8 +1781,13 @@ class GenericCCModel(GenericModel):
               enabled=enable_permutation_variable_importances,
               num_rounds=permutation_variable_importance_rounds,
           ),
+          shap_variable_importance=model_analysis_pb2.Options.ShapVariableImportance(
+              enabled=shap_values,
+              example_sampling=sampling,
+          ),
           include_model_structural_variable_importances=True,
       )
+      # TODO: Use "shap_values" to enable other SHAP based analyses.
       if features is not None:
         options_proto.features.extend(features)
 

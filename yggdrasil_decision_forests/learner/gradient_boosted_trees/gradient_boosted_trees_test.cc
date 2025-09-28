@@ -37,6 +37,7 @@
 #include "absl/container/btree_set.h"
 #include "absl/container/fixed_array.h"
 #include "absl/log/log.h"
+#include "absl/log/scoped_mock_log.h"
 #include "absl/status/status.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
@@ -83,7 +84,10 @@ namespace gradient_boosted_trees {
 namespace {
 
 using test::EqualsProto;
+using ::testing::_;
+using ::testing::AnyNumber;
 using ::testing::ElementsAre;
+using ::testing::HasSubstr;
 using ::testing::IsEmpty;
 using ::testing::SizeIs;
 using ::testing::UnorderedElementsAre;
@@ -430,7 +434,7 @@ TEST(GradientBoostedTrees, CreateGradientDataset) {
 
   const auto loss_imp = CreateLoss(proto::Loss::BINOMIAL_LOG_LIKELIHOOD,
                                    model::proto::Task::CLASSIFICATION,
-                                   dataset.data_spec().columns(1), {})
+                                   dataset.data_spec().columns(1), {}, {})
                             .value();
   CHECK_OK(internal::CreateGradientDataset(dataset,
                                            /* label_col_idx= */ 1,
@@ -1590,6 +1594,24 @@ TEST_F(GradientBoostedTreesOnAdult, PoissonLoss) {
   TrainAndEvaluateModel();
 }
 
+TEST_F(GradientBoostedTreesOnAdult, TotalMaxNumNodes) {
+  auto* gbt_config = train_config_.MutableExtension(
+      gradient_boosted_trees::proto::gradient_boosted_trees_config);
+  gbt_config->set_total_max_num_nodes(1000);
+  TrainAndEvaluateModel();
+  YDF_TEST_METRIC(metric::Accuracy(evaluation_), 0.8575, 0.0115, 0.855);
+  YDF_TEST_METRIC(metric::LogLoss(evaluation_), 0.3242, 0.0113, 0.3298);
+  auto* gbt_model =
+      dynamic_cast<const GradientBoostedTreesModel*>(model_.get());
+  EXPECT_GE(gbt_model->NumTrees(), 18);
+  EXPECT_LE(gbt_model->NumTrees(), 22);
+  int64_t total_num_nodes = 0;
+  for (const auto& t : gbt_model->decision_trees()) {
+    total_num_nodes += t->NumNodes();
+  }
+  EXPECT_LE(total_num_nodes, 1000);
+}
+
 // Helper for the training and testing on two non-overlapping samples from the
 // Abalone dataset.
 class GradientBoostedTreesOnAbalone : public utils::TrainAndTestTester {
@@ -1944,7 +1966,7 @@ TEST(DartPredictionAccumulator, Base) {
   std::vector<float> predictions;
   const auto loss_imp =
       CreateLoss(proto::Loss::SQUARED_ERROR, model::proto::Task::REGRESSION,
-                 dataset.data_spec().columns(0), {})
+                 dataset.data_spec().columns(0), {}, {})
           .value();
   CHECK_OK(internal::CreateGradientDataset(dataset,
                                            /* label_col_idx= */ 0,
@@ -2195,6 +2217,36 @@ TEST_F(GradientBoostedTreesOnAdult, EarlyStoppingInitialIteration) {
   const GradientBoostedTreesModel* gbt_model =
       dynamic_cast<const GradientBoostedTreesModel*>(model.get());
   EXPECT_EQ(gbt_model->NumTrees(), 1);
+}
+
+TEST_F(GradientBoostedTreesOnAdult, EarlyStoppingTooEarlyStopWarning) {
+  absl::ScopedMockLog log;
+  EXPECT_CALL(log, Log).Times(AnyNumber());
+  EXPECT_CALL(
+      log,
+      Log(absl::LogSeverity::kWarning, _,
+          HasSubstr(
+              "The best validation loss was obtained during iteration 3")));
+  ASSERT_OK_AND_ASSIGN(const dataset::VerticalDataset dataset,
+                       CreateToyDataset());
+  // Configure model training.
+  model::proto::DeploymentConfig deployment_config;
+  model::proto::TrainingConfig train_config;
+  train_config.set_learner(GradientBoostedTreesLearner::kRegisteredName);
+  train_config.set_task(model::proto::Task::CLASSIFICATION);
+  train_config.set_label("b");
+  train_config.add_features("a");
+
+  std::unique_ptr<model::AbstractLearner> learner;
+  auto* gbt_config = train_config.MutableExtension(
+      gradient_boosted_trees::proto::gradient_boosted_trees_config);
+  gbt_config->set_early_stopping_num_trees_look_ahead(1);
+  gbt_config->set_early_stopping_initial_iteration(3);
+  gbt_config->set_validation_set_ratio(0.3f);
+  ASSERT_OK(model::GetLearner(train_config, &learner, deployment_config));
+
+  log.StartCapturingLogs();
+  ASSERT_OK(learner->TrainWithStatus(dataset));
 }
 
 TEST_F(GradientBoostedTreesOnIris, InterruptAndResumeTraining) {

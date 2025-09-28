@@ -716,6 +716,7 @@ Use `model.describe()` for more details
         created_date=31415,
         uid=271828,
         framework="TestFramework",
+        custom_fields={"string": "bar", "bytes": b"Caf\351"},
     )
     self.adult_binary_class_gbdt.set_metadata(metadata)
     self.assertEqual(metadata, self.adult_binary_class_gbdt.metadata())
@@ -1273,6 +1274,29 @@ Use `model.describe()` for more details
         self.synthetic_ranking_gbdt_test_ds, mrr_truncation=truncation
     )
     self.assertAlmostEqual(evaluation.mrr, expected_mrr)
+
+  @parameterized.named_parameters(
+      {
+          "testcase_name": "map@5",
+          "truncation": 5,
+          "expected_map": 0.793028052,
+      },
+      {
+          "testcase_name": "map@2",
+          "truncation": 2,
+          "expected_map": 0.792079209,
+      },
+      {
+          "testcase_name": "map@10",
+          "truncation": 10,
+          "expected_map": 0.7601983518,
+      },
+  )
+  def test_evaluate_ranking_map_truncation(self, truncation, expected_map):
+    evaluation = self.synthetic_ranking_gbdt.evaluate(
+        self.synthetic_ranking_gbdt_test_ds, map_truncation=truncation
+    )
+    self.assertAlmostEqual(evaluation.map, expected_map, places=3)
 
   def test_model_save_pure_serving(self):
     model_path = os.path.join(
