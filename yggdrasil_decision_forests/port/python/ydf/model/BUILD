@@ -37,6 +37,7 @@ pybind_library(
         "@com_google_absl//absl/strings:str_format",
         "@com_google_absl//absl/time",
         "@com_google_absl//absl/types:span",
+        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec",
         "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_cc_proto",
         "@ydf_cc//yggdrasil_decision_forests/dataset:types",
         "@ydf_cc//yggdrasil_decision_forests/dataset:vertical_dataset",
@@ -174,14 +175,13 @@ py_library(
     srcs = ["model_lib.py"],
     deps = [
         ":generic_model",
-        # absl/logging dep,
-        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
         "//ydf/cc:ydf",
         "//ydf/dataset:dataspec",
         "//ydf/model/gradient_boosted_trees_model",
         "//ydf/model/isolation_forest_model",
         "//ydf/model/random_forest_model",
         "//ydf/utils:log",
+        "@ydf_cc//yggdrasil_decision_forests/dataset:data_spec_py_proto",
     ],
 )
 
@@ -408,7 +408,7 @@ py_test(
         # absl/testing:absltest dep,
         # absl/testing:parameterized dep,
         # fastapi dep,  # buildcleaner: keep
-        # pydantic dep,  # buildcleaner: keep
+        # pydantic:pydantic_v2 dep,  # buildcleaner: keep
         # requests dep,  # buildcleaner: keep
         "//ydf:api",
         "//ydf/utils:test_utils",

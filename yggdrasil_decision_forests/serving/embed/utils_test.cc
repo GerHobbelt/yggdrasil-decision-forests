@@ -110,5 +110,17 @@ TEST(Embed, UnsignedIntegerToDtype) {
   EXPECT_EQ(UnsignedIntegerToDtype(4), proto::DType::UINT32);
 }
 
+TEST(NumBytesToMaxUnsignedValue, Basic) {
+  EXPECT_EQ(NumBytesToMaxUnsignedValue(1), 0xff);
+  EXPECT_EQ(NumBytesToMaxUnsignedValue(2), 0xffff);
+  EXPECT_EQ(NumBytesToMaxUnsignedValue(4), 0xffffffff);
+}
+
+TEST(QuoteString, Basic) {
+  EXPECT_EQ(QuoteString("hello"), "\"hello\"");
+  EXPECT_EQ(QuoteString("hello\"world"), "\"hello\\\"world\"");
+  EXPECT_EQ(QuoteString("hello\nworld"), "\"hello\\nworld\"");
+}
+
 }  // namespace
 }  // namespace yggdrasil_decision_forests::serving::embed

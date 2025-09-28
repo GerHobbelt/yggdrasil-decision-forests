@@ -2,6 +2,7 @@
 #define YDF_MODEL_YDF_MODEL_H_
 
 #include <stdint.h>
+#include <cstring>
 #include <array>
 #include <algorithm>
 #include <bitset>
@@ -30,20 +31,17 @@ struct Instance {
 struct __attribute__((packed)) Node {
   uint8_t pos = 0;
   union {
-    struct {
+    struct __attribute__((packed)) {
       uint8_t feat;
       union {
         float thr;
       };
     } cond;
-    struct {
+    struct __attribute__((packed)) {
       float val;
     } leaf;
   };
 };
-
-static const uint8_t root_deltas[] = {5,15,11};
-
 static const Node nodes[] = {
 {.pos=1,.cond={.feat=3,.thr=0.8}},
 {.leaf={.val=0.3}},
@@ -78,18 +76,22 @@ static const Node nodes[] = {
 {.leaf={.val=0.3}},
 };
 
+static const uint8_t root_deltas[] = {5,15,11};
+
+
 inline Label Predict(const Instance& instance) {
   std::array<float, 3> accumulator {0, 0, 0};
 
   const Node* root = nodes;
   const Node* node;
-  const auto* raw_numerical = reinterpret_cast<const float*>(&instance);
-  (void) raw_numerical;
+  const char* raw_instance = (const char*)(&instance);
   uint8_t eval;
   for (uint8_t tree_idx = 0; tree_idx != kNumTrees; tree_idx++) {
     node = root;
     while(node->pos) {
-        eval = raw_numerical[node->cond.feat] >= node->cond.thr;
+        float numerical_feature;
+        std::memcpy(&numerical_feature, raw_instance + node->cond.feat * sizeof(float), sizeof(float));
+        eval = numerical_feature >= node->cond.thr;
 
       node += (node->pos & -eval) + 1;
     }

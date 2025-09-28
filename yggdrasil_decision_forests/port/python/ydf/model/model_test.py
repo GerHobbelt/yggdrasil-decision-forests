@@ -686,15 +686,17 @@ class GenericModelTest(parameterized.TestCase):
 Model: GRADIENT_BOOSTED_TREES
 Task: CLASSIFICATION
 Class: ydf.GradientBoostedTreesModel
-Use `model.describe()` for more details
+Use `model.describe()` for more details.
 """,
     )
 
   def test_model_describe_text(self):
-    self.assertIn(
-        'Type: "GRADIENT_BOOSTED_TREES"',
-        self.adult_binary_class_gbdt.describe("text"),
-    )
+    text_description = self.adult_binary_class_gbdt.describe("text")
+    # Model description
+    self.assertIn('Type: "GRADIENT_BOOSTED_TREES"', text_description)
+    # Dataspec description
+    self.assertIn("DATASPEC:", text_description)
+    self.assertIn("Number of records:", text_description)
 
   def test_model_describe_html(self):
     html_description = self.adult_binary_class_gbdt.describe("html")
@@ -851,6 +853,7 @@ Use `model.describe()` for more details
     embedded_model_routing_proba = model.to_standalone_cc(
         algorithm="ROUTING",
         classification_output="PROBABILITY",
+        categorical_from_string=False,
     )
     self.assertIsInstance(embedded_model_if_else_class, str)
     self.assertIsInstance(embedded_model_routing_proba, str)

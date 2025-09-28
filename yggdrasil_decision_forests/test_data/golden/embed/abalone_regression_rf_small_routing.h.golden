@@ -2,6 +2,7 @@
 #define YDF_MODEL_YDF_MODEL_H_
 
 #include <stdint.h>
+#include <cstring>
 #include <array>
 #include <algorithm>
 #include <bitset>
@@ -35,24 +36,18 @@ struct Instance {
 struct __attribute__((packed)) Node {
   uint16_t pos = 0;
   union {
-    struct {
+    struct __attribute__((packed)) {
       uint8_t feat;
       union {
         float thr;
         uint16_t cat;
       };
     } cond;
-    struct {
+    struct __attribute__((packed)) {
       float val;
     } leaf;
   };
 };
-
-static const uint8_t condition_types[] = {1,0,0,0,0,0,0,0};
-
-
-static const uint16_t root_deltas[] = {1199,1211,1233};
-
 static const Node nodes[] = {
 {.pos=377,.cond={.feat=4,.thr=0.52175}},
 {.pos=77,.cond={.feat=2,.thr=0.2325}},
@@ -3699,25 +3694,32 @@ static const Node nodes[] = {
 {.leaf={.val=7}},
 };
 
-  static const std::bitset<360> categorical_bank {"100010000110010010000110100000100010010000101000001001100110010010001000110000101000001000100010001010101000110010000110100010101010010001000010100001100110110001101000011001000010100010101000001010000110001010100100011000101000011010001000011010001010001000100010110010000110011010100010100001001010010001001000100010101010110001101000101010001010001010100010"};
-  
+static const uint8_t condition_types[] = {1,0,0,0,0,0,0,0};
+
+
+static const uint16_t root_deltas[] = {1199,1211,1233};
+
+
+static const std::bitset<360> categorical_bank {"100010000110010010000110100000100010010000101000001001100110010010001000110000101000001000100010001010101000110010000110100010101010010001000010100001100110110001101000011001000010100010101000001010000110001010100100011000101000011010001000011010001010001000100010110010000110011010100010100001001010010001001000100010101010110001101000101010001010001010100010"};
+
 inline float Predict(const Instance& instance) {
   float accumulator {0};
 
   const Node* root = nodes;
   const Node* node;
-  const auto* raw_numerical = reinterpret_cast<const float*>(&instance);
-  (void) raw_numerical;
-  const auto* raw_categorical = reinterpret_cast<const uint32_t*>(&instance);
-  (void) raw_categorical;
+  const char* raw_instance = (const char*)(&instance);
   uint16_t eval;
   for (uint8_t tree_idx = 0; tree_idx != kNumTrees; tree_idx++) {
     node = root;
     while(node->pos) {
       if (condition_types[node->cond.feat] == 0) {
-        eval = raw_numerical[node->cond.feat] >= node->cond.thr;
+        float numerical_feature;
+        std::memcpy(&numerical_feature, raw_instance + node->cond.feat * sizeof(float), sizeof(float));
+        eval = numerical_feature >= node->cond.thr;
       } else if (condition_types[node->cond.feat] == 1) {
-        eval = categorical_bank[raw_categorical[node->cond.feat] + node->cond.cat];
+        uint32_t categorical_feature;
+        std::memcpy(&categorical_feature, raw_instance + node->cond.feat * sizeof(uint32_t), sizeof(uint32_t));
+        eval = categorical_bank[categorical_feature + node->cond.cat];
       } else {
         assert(false);
       }

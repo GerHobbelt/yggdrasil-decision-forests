@@ -36,7 +36,7 @@ extra_css:
   - style/extra.css
   - https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined
 
-strict: false # TODO: Set to true before release.
+strict: true
 
 nav:
   - 🏡 Home: index.md
@@ -53,6 +53,7 @@ nav:
     - How to improve a model?: guide_how_to_improve_model.md
     - How to train a model faster?: guide_how_to_improve_learner.md
     - Migrating from TF-DF: tutorial/migrating_to_ydf.ipynb
+    - General ML FAQ: general_ml_faq.md
   - Tasks solved by YDF:
     - Classification: tutorial/classification.ipynb
     - Regression: tutorial/regression.ipynb
@@ -103,8 +104,6 @@ nav:
     - Inspecting trees: tutorial/inspecting_trees.ipynb
     - Editing trees: tutorial/editing_trees.ipynb
     - Custom loss: tutorial/custom_loss.ipynb
-  #  - example distance: tutorial/example_distance.ipynb
-    # TODO: model inspection, manual tree creation, custom loss.
   - Other APIs:
     - CLI quickstart: cli_quickstart.md
     - JavaScript: javascript.md

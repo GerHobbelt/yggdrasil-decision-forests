@@ -22,6 +22,7 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/log/check.h"
 #include "absl/status/status.h"
+#include "absl/strings/escaping.h"
 #include "absl/strings/str_cat.h"
 #include "absl/strings/string_view.h"
 #include "yggdrasil_decision_forests/serving/embed/embed.pb.h"
@@ -186,6 +187,20 @@ int MaxUnsignedValueToNumBytes(uint32_t value) {
   }
 }
 
+uint32_t NumBytesToMaxUnsignedValue(int bytes) {
+  switch (bytes) {
+    case 1:
+      return 0xff;
+    case 2:
+      return 0xffff;
+    case 4:
+      return 0xffffffff;
+    default:
+      DCHECK(false);
+      return 0;
+  }
+}
+
 int MaxSignedValueToNumBytes(int32_t value) {
   if (value <= 0x7f && value >= -0x80) {
     return 1;
@@ -251,6 +266,10 @@ int NumLeavesToNumNodes(int num_leaves) {
     return 0;
   }
   return 2 * num_leaves - 1;
+}
+
+std::string QuoteString(absl::string_view input) {
+  return absl::StrCat("\"", absl::CEscape(input), "\"");
 }
 
 }  // namespace yggdrasil_decision_forests::serving::embed

@@ -42,10 +42,17 @@ std::string StringToVariableSymbol(absl::string_view input);
 std::string StringToStructSymbol(absl::string_view input,
                                  bool ensure_letter_first = true);
 
+// Convert any string to a quoted string that can be used to initialize a string
+// variable (event if the string contains " characters or line returns).
+std::string QuoteString(absl::string_view input);
+
 // Computes the number of bytes to encode an unsigned value. Can return 1, 2,
 // or 4. For example, "MaxUnsignedValueToNumBytes" returns 2 for value=600
 // (since using a single byte cannot encode a value greater than 255).
 int MaxUnsignedValueToNumBytes(uint32_t value);
+
+// Maximum unsigned value to encode with "bytes" bytes.
+uint32_t NumBytesToMaxUnsignedValue(int bytes);
 
 // Same as MaxUnsignedValueToNumBytes, but for signed values.
 int MaxSignedValueToNumBytes(int32_t value);

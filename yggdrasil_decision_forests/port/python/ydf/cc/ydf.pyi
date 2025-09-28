@@ -218,6 +218,7 @@ class GenericCCModel:
 
 class DecisionForestCCModel(GenericCCModel):
   def num_trees(self) -> int: ...
+  def num_nodes(self) -> int: ...
   def PredictLeaves(
       self,
       dataset: VerticalDataset,
@@ -378,6 +379,9 @@ class GenericCCLearner:
       evaluation_options: metric_pb2.EvaluationOptions,
       deployment_evaluation: abstract_learner_pb2.DeploymentConfig,
   ) -> metric_pb2.EvaluationResults: ...
+  def BootstrappingIndices(
+      self, num_examples: int, tree_idx: int
+  ) -> List[int]: ...
 
 def GetLearner(
     train_config: abstract_learner_pb2.TrainingConfig,
