@@ -16,6 +16,7 @@
 #include "yggdrasil_decision_forests/learner/gradient_boosted_trees/loss/loss_imp_poisson.h"
 
 #include <cmath>
+#include <string>
 #include <tuple>
 #include <vector>
 
@@ -23,7 +24,6 @@
 #include "gtest/gtest.h"
 #include "absl/status/statusor.h"
 #include "yggdrasil_decision_forests/dataset/data_spec.pb.h"
-#include "yggdrasil_decision_forests/dataset/types.h"
 #include "yggdrasil_decision_forests/dataset/vertical_dataset.h"
 #include "yggdrasil_decision_forests/learner/abstract_learner.pb.h"
 #include "yggdrasil_decision_forests/learner/decision_tree/decision_tree.pb.h"
@@ -31,9 +31,9 @@
 #include "yggdrasil_decision_forests/learner/gradient_boosted_trees/gradient_boosted_trees.pb.h"
 #include "yggdrasil_decision_forests/learner/gradient_boosted_trees/loss/loss_interface.h"
 #include "yggdrasil_decision_forests/model/abstract_model.pb.h"
-#include "yggdrasil_decision_forests/model/decision_tree/decision_tree.h"
 #include "yggdrasil_decision_forests/utils/concurrency.h"
 #include "yggdrasil_decision_forests/utils/random.h"
+#include "yggdrasil_decision_forests/utils/status_macros.h"
 #include "yggdrasil_decision_forests/utils/test.h"
 #include "yggdrasil_decision_forests/utils/testing_macros.h"
 
@@ -48,7 +48,6 @@ using ::testing::ElementsAre;
 using ::testing::FloatNear;
 using ::testing::IsEmpty;
 using ::testing::Not;
-using ::testing::SizeIs;
 
 // Margin of error for numerical tests.
 constexpr float kTestPrecision = 0.000001f;
@@ -175,8 +174,7 @@ TEST_P(PoissonLossTest, UpdateGradientsLabelColIdx) {
                                        dataset.data_spec().columns(0)}));
 
   ASSERT_OK(internal::CreateGradientDataset(dataset,
-                                            /* label_col_idx= */ 0,
-                                            /*hessian_splits=*/false, *loss_imp,
+                                            /* label_col_idx= */ 0, *loss_imp,
                                             &gradient_dataset, &gradients,
                                             &predictions));
 
@@ -227,8 +225,7 @@ TEST_P(PoissonLossTest, UpdateGradientsPredictions) {
                                        dataset.data_spec().columns(0)}));
   std::vector<float> labels = {1.f, 2.f, 3.f, 4.f};
   ASSERT_OK(internal::CreateGradientDataset(dataset,
-                                            /* label_col_idx= */ 0,
-                                            /*hessian_splits=*/false, *loss_imp,
+                                            /* label_col_idx= */ 0, *loss_imp,
                                             &gradient_dataset, &gradients,
                                             &predictions));
   GradientDataRef compact_gradient(gradients.size());

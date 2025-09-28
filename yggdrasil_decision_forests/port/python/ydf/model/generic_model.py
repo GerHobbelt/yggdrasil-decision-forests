@@ -549,7 +549,6 @@ Use `model.describe()` for more details
       ndcg_truncation: int = 5,
       mrr_truncation: int = 5,
       map_truncation: int = 5,
-      evaluation_task: Optional[Task] = None,
       use_slow_engine: bool = False,
       num_threads: Optional[int] = None,
   ) -> metric.Evaluation:
@@ -575,8 +574,7 @@ Use `model.describe()` for more details
     ```
     evaluation = model.evaluate(test_ds)
     # If model is an anomaly detection model:
-    # evaluation = model.evaluate(test_ds,
-                                  evaluation_task=ydf.Task.CLASSIFICATION)
+    # evaluation = model.evaluate(test_ds, task=ydf.Task.CLASSIFICATION)
     evaluation
     ```
 
@@ -624,7 +622,6 @@ Use `model.describe()` for more details
         should be truncated. Default to 5. Ignored for non-ranking models.
       map_truncation: Controls at which ranking position the MAP metric loss
         should be truncated. Default to 5. Ignored for non-ranking models.
-      evaluation_task: Deprecated. Use `task` instead.
       use_slow_engine: If true, uses the slow engine for making predictions. The
         slow engine of YDF is an order of magnitude slower than the other
         prediction engines. There exist very rare edge cases where predictions
@@ -1240,6 +1237,10 @@ Use `model.describe()` for more details
 
   @abc.abstractmethod
   def label_col_idx(self) -> int:
+    """Returns the index of the label column in the dataspec or -1.
+
+    If the model has been trained without a label, returns -1.
+    """
     raise NotImplementedError
 
   @abc.abstractmethod
@@ -1326,8 +1327,16 @@ Use `model.describe()` for more details
 
     return [f.name for f in self.input_features()]
 
-  def label(self) -> str:
-    """Name of the label column."""
+  def label(self) -> Optional[str]:
+    """Name of the label column or None if the model has no label column."""
+    label_col_idx = self.label_col_idx()
+    if label_col_idx < -1:
+      raise ValueError(
+          f"Invalid label column index {label_col_idx}. This model might be"
+          " corrupted."
+      )
+    if label_col_idx == -1:
+      return None
     return self.data_spec().columns[self.label_col_idx()].name
 
   def label_classes(self) -> List[str]:
@@ -1614,22 +1623,11 @@ class GenericCCModel(GenericModel):
       ndcg_truncation: int = 5,
       mrr_truncation: int = 5,
       map_truncation: int = 5,
-      evaluation_task: Optional[Task] = None,
       use_slow_engine: bool = False,
       num_threads: Optional[int] = None,
   ) -> metric.Evaluation:
     if num_threads is None:
       num_threads = concurrency.determine_optimal_num_threads(training=False)
-
-    # Warning about deprecation of "evaluation_task"
-    if evaluation_task is not None:
-      log.warning(
-          "The `evaluation_task` argument is deprecated. Use `task` instead.",
-          message_id=log.WarningMessage.DEPRECATED_EVALUATION_TASK,
-      )
-      if task is not None:
-        raise ValueError("Cannot specify both `task` and `evaluation_task`")
-      task = evaluation_task
 
     # Warning about change default value of "weighted")
     if weighted is None:
@@ -1657,6 +1655,20 @@ class GenericCCModel(GenericModel):
           " is evaluated the same way it was trained.",
           message_id=log.WarningMessage.UNNECESSARY_LABEL_ARGUMENT,
       )
+
+    if self.label() is None:
+      if self.task() == Task.ANOMALY_DETECTION:
+        raise ValueError(
+            "This Anomaly Detection model has been trained without specifying"
+            " the label column during training. Set `label=` in the learner"
+            " before training to enable model evaluation. Alternatively, use"
+            " `ydf.evaluate_predictions()` to evaluate the model without"
+            " specifying a label.",
+        )
+      else:
+        raise ValueError(
+            "This model does not have a label and cannot be evaluated."
+        )
 
     if isinstance(bootstrapping, bool):
       bootstrapping_samples = 2000 if bootstrapping else -1
@@ -1816,6 +1828,13 @@ class GenericCCModel(GenericModel):
       feature_specs: Optional[Dict[str, Any]] = None,
       force: bool = False,
   ) -> None:
+
+    # TODO: Add tensorflow support for anomaly detection.
+    if self.task() == Task.ANOMALY_DETECTION:
+      raise ValueError(
+          "Anomaly Detection models are not yet supported for export to"
+          " Tensorflow."
+      )
     if mode == "keras":
       log.warning(
           "Calling `to_tensorflow_saved_model(mode='keras', ...)`. Use"
@@ -1847,6 +1866,13 @@ class GenericCCModel(GenericModel):
       squeeze_binary_classification: bool = True,
       force: bool = False,
   ) -> "tensorflow.Module":  # pylint: disable=undefined-variable
+
+    # TODO: Add tensorflow support for anomaly detection.
+    if self.task() == Task.ANOMALY_DETECTION:
+      raise ValueError(
+          "Anomaly Detection models are not yet supported for export to"
+          " Tensorflow."
+      )
     return _get_export_tf().ydf_model_to_tf_function(
         ydf_model=self,
         temp_dir=temp_dir,

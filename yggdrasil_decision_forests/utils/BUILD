@@ -335,6 +335,7 @@ cc_library_ydf(
     ],
     deps = [
         ":synchronization_primitives",
+        "@com_google_absl//absl/base:no_destructor",
         "@com_google_absl//absl/status",
         "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
@@ -1117,10 +1118,14 @@ cc_test(
     name = "registration_test",
     srcs = ["registration_test.cc"],
     deps = [
+        ":concurrency",
         ":registration",
         ":test",
+        "@com_google_absl//absl/memory",
         "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
         "@com_google_absl//absl/strings",
+        "@com_google_absl//absl/time",
         "@com_google_googletest//:gtest_main",
     ],
 )
@@ -1372,6 +1377,7 @@ cc_test(
 cc_test(
     name = "plot_test",
     srcs = ["plot_test.cc"],
+    data = ["//yggdrasil_decision_forests/test_data"],
     deps = [
         ":filesystem",
         ":plot",

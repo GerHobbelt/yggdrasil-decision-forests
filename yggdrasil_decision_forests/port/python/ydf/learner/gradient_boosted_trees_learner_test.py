@@ -502,6 +502,27 @@ class GradientBoostedTreesLearnerTest(learner_test_utils.LearnerTest):
     self.assertIsNotNone(logs)
     self.assertLen(logs.trials, 5)
 
+  def test_tuner_cross_validation(self):
+    tuner = tuner_lib.RandomSearchTuner(
+        num_trials=5,
+        automatic_search_space=True,
+        parallel_trials=2,
+        cross_validation=True,
+        cross_validation_num_folds=3,  # Reduce num_folds because cv is slow.
+    )
+    learner = specialized_learners.GradientBoostedTreesLearner(
+        label="income",
+        tuner=tuner,
+        num_trees=10,
+        num_threads=30,
+    )
+
+    model, _, _ = self._check_adult_model(learner, minimum_accuracy=0.85)
+    logs = model.hyperparameter_optimizer_logs()
+    self.assertIsNotNone(logs)
+    self.assertLen(logs.trials, 5)
+    self.assertGreater(logs.trials[0].score, 0)
+
   def test_label_type_error_message(self):
     with self.assertRaisesRegex(
         ValueError,
@@ -520,9 +541,15 @@ class GradientBoostedTreesLearnerTest(learner_test_utils.LearnerTest):
           label="l", task=generic_learner.Task.REGRESSION
       ).train(pd.DataFrame({"l": ["A", "B"], "f": [0, 1]}))
 
-  def test_shap_adult(self):
+  @parameterized.parameters(
+      ("LOCAL",),
+      ("BEST_FIRST_GLOBAL",),
+  )
+  def test_shap_adult(self, growing_strategy):
     model = specialized_learners.GradientBoostedTreesLearner(
-        label="income", num_trees=20
+        label="income",
+        num_trees=20,
+        growing_strategy=growing_strategy,
     ).train(self.adult.train_pd)
 
     shape_values, initial_values = model.predict_shap(self.adult.test_pd)
@@ -562,6 +589,17 @@ class GradientBoostedTreesLearnerTest(learner_test_utils.LearnerTest):
         initial_values + np.sum([v for v in shape_values.values()], axis=0)
     )
     npt.assert_almost_equal(predictions, predictions_from_shap, decimal=5)
+
+  def test_label_stored_in_model(self):
+    ds = {
+        "f": np.array([1, 2, 3, 4, 5, 6], dtype=float),
+        "label": np.array(["a", "a", "b", "b", "b", "c"]),
+    }
+    model = specialized_learners.GradientBoostedTreesLearner(
+        label="label"
+    ).train(ds)
+    self.assertEqual(model.label_col_idx(), 0)
+    self.assertEqual(model.label(), "label")
 
 
 if __name__ == "__main__":
