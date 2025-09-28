@@ -511,13 +511,21 @@ class GenericJAXModel(generic_model.GenericModel):
   def to_cpp(self, key: str = "my_model") -> str:
     raise NotImplementedError  # TODO: Implement.
 
+  def to_standalone_cc(
+      self,
+      name: str = "ydf_model",
+      algorithm: Literal["IF_ELSE", "ROUTING"] = "ROUTING",
+      classification_output: Literal["CLASS", "SCORE", "PROBABILITY"] = "CLASS",
+  ) -> Union[str, Dict[str, str]]:
+    raise NotImplementedError
+
   # TODO: Change default value of "mode" before 1.0 release.
   def to_tensorflow_saved_model(  # pylint: disable=dangerous-default-value
       self,
       path: str,
       input_model_signature_fn: Any = None,
       *,
-      mode: Literal["keras", "tf"] = "keras",
+      mode: Literal["keras", "tf"] = "tf",
       feature_dtypes: Dict[str, "export_tf.TFDType"] = {},  # pytype: disable=name-error
       servo_api: bool = False,
       feed_example_proto: bool = False,

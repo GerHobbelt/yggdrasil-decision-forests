@@ -38,6 +38,7 @@ from ydf.model import template_cpp_export
 from ydf.utils import concurrency
 from ydf.utils import html
 from ydf.utils import log
+from yggdrasil_decision_forests.serving.embed import embed_pb2
 from yggdrasil_decision_forests.utils import model_analysis_pb2
 
 
@@ -72,6 +73,7 @@ class Task(enum.Enum):
       training data or anomalous (a.k.a. an outlier). An anomaly detection
       prediction is a value between 0 and 1, where 0 indicates the possible most
       normal instance and 1 indicates the most possible anomalous instance.
+    SURVIVAL_ANALYSIS: Predicts the survival probability of an individual.
   """
 
   CLASSIFICATION = "CLASSIFICATION"
@@ -80,6 +82,7 @@ class Task(enum.Enum):
   CATEGORICAL_UPLIFT = "CATEGORICAL_UPLIFT"
   NUMERICAL_UPLIFT = "NUMERICAL_UPLIFT"
   ANOMALY_DETECTION = "ANOMALY_DETECTION"
+  SURVIVAL_ANALYSIS = "SURVIVAL_ANALYSIS"
 
   def _to_proto_type(self) -> abstract_model_pb2.Task:
     if self in TASK_TO_PROTO:
@@ -103,6 +106,7 @@ TASK_TO_PROTO = {
     Task.CATEGORICAL_UPLIFT: abstract_model_pb2.CATEGORICAL_UPLIFT,
     Task.NUMERICAL_UPLIFT: abstract_model_pb2.NUMERICAL_UPLIFT,
     Task.ANOMALY_DETECTION: abstract_model_pb2.ANOMALY_DETECTION,
+    Task.SURVIVAL_ANALYSIS: abstract_model_pb2.SURVIVAL_ANALYSIS,
 }
 PROTO_TO_TASK = {v: k for k, v in TASK_TO_PROTO.items()}
 
@@ -152,6 +156,31 @@ class InputFeature:
   name: str
   semantic: dataspec.Semantic
   column_idx: int
+
+
+@dataclasses.dataclass(frozen=True)
+class TrainingLogEntry:
+  """Evaluation metrics computed during the training of the model.
+
+  This structure is returned by `model.training_logs()`. It contains the
+  evaluation metrics of the model at a specific point during the training (e.g.
+  after a given number of trees have been trained).
+
+  Attributes:
+    iteration: Training iteration when the evaluation was created. For many
+      models, the training iteration is equal to the number of trees.
+    evaluation: Evaluation metrics at `iteration` trees For Gradient Boosted
+      Trees, this is the evaluation on the validation dataset. For Random
+      Forests, this is the out-of-bag evaluation.
+    training_evaluation: Evaluation metrics computed on the training dataset at
+      `iteration` trees. The training evaluation is generally less insightful
+      than the main evaluation (which is computed on a validation or OOB
+      dataset), but it can be helpful for model debugging.
+  """
+
+  iteration: int
+  evaluation: metric.Evaluation
+  training_evaluation: Optional[metric.Evaluation]
 
 
 class GenericModel(abc.ABC):
@@ -760,6 +789,17 @@ Use `model.describe()` for more details
   def to_cpp(self, key: str = "my_model") -> str:
     """Generates the code of a .h file to run the model in C++.
 
+    Relation to "to_standalone_cc": The "to_cpp" method is currently the
+    generally
+    recommended, fastest and most model compatible one to productionize models
+    in C++. The alternative function "to_standalone_cc" aims to replace it, but
+    it
+    currently slower and has worst compatbility. However, "to_standalone_cc"
+    produces already much smaller binaries (up to 1000x smaller for the same
+    model) and has zero dependencies make it suited for size-critical and
+    non-google3 develoment. See the "to_standalone_cc" documentation for a
+    comparison of both approach.
+
     How to use this function:
 
     1. Copy the output of this function in a new .h file.
@@ -794,12 +834,80 @@ Use `model.describe()` for more details
     raise NotImplementedError
 
   @abc.abstractmethod
+  def to_standalone_cc(
+      self,
+      name: str = "ydf_model",
+      algorithm: Literal["IF_ELSE", "ROUTING"] = "ROUTING",
+      classification_output: Literal["CLASS", "SCORE", "PROBABILITY"] = "CLASS",
+  ) -> Union[str, Dict[str, str]]:
+    """Generates the standalone code of a .h file to run the model in C++.
+
+    How to use this function:
+
+    1. Copy the output of this function in a new .h file.
+    2. In your library, call the model as follows:
+      ```c++
+      using namespace <name>;
+      const auto pred = Prediction(Instance{.f1=5, f2=F2:kRed});
+      ```
+      Note: The function is thread safe.
+
+    Alternatively, instead of generating and copy/pasting the C++ code
+    manually, you can use the "cc_ydf_standalone_model " equivalent build rule.
+
+    1. Save the model with `model.save(...)` in a directory in Google3.
+    2. Create a BUILD file with a filegroup in the model directory e.g.:
+      ```
+      filegroup(
+        name = "model",
+        srcs = glob(["**"]),
+      )
+      ```
+    3. In your library's BUILD, create a "cc_ydf_standalone_model " build rule.
+      ```
+      load("//external/ydf_cc/yggdrasil_decision_forests/serving/embed:embed.bzl",
+        "cc_ydf_standalone_model ")
+      cc_ydf_standalone_model (
+        name = "my_model",
+        classification_output = "SCORE",
+        data = "<path to filegroup>",
+      )
+      ```
+    4. In your cc_binary or cc_library, add ":my_model" as a dependency.
+    5. In your C++ code, inlcude:
+      ```c++
+      #include "<path to BUILD>/my_model.h"
+      ```
+      Then call:
+      ```c++
+      using namespace <name>;
+      const auto pred = Prediction(Instance{.f1=5, f2=F2:kRed});
+      ```
+
+    Args:
+      name: Name of the model. Used to define the C++ namespace of the model.
+      algorithm: Underlying algorithm used to compute the predictions. Can be
+        "ROUTING" (default; faster and smaller binary) or "IF_ELSE" (redable
+        if-else conditions).
+      classification_output: Output of the model if the model is a
+        classification model. Can be "CLASS" (default; fast), "SCORE" (raw score
+        of all the classes, e.g. logits), "PROBABILITY" (probability of all the
+        classes; slower than other approaches as it requires the evaluation of a
+        soft-max or equivalent).
+
+    Returns:
+      Source code content (if there is only one file) or dictionary of filename
+      to source code content.
+    """
+    raise NotImplementedError
+
+  @abc.abstractmethod
   def to_tensorflow_saved_model(  # pylint: disable=dangerous-default-value
       self,
       path: str,
       input_model_signature_fn: Any = None,
       *,
-      mode: Literal["keras", "tf"] = "keras",
+      mode: Literal["keras", "tf"] = "tf",
       feature_dtypes: Dict[str, "export_tf.TFDType"] = {},  # pytype: disable=name-error
       servo_api: bool = False,
       feed_example_proto: bool = False,
@@ -958,6 +1066,9 @@ Use `model.describe()` for more details
     For more flexibility, use the method `to_tensorflow_function` instead of
     `to_tensorflow_saved_model`.
 
+    Note that export to Tensorflow is not yet available for Isolation Forest
+    models.
+
     Args:
       path: Path to store the Tensorflow Decision Forests model.
       input_model_signature_fn: A lambda that returns the
@@ -1040,6 +1151,9 @@ Use `model.describe()` for more details
     TensorFlow Decision Forests Custom Inference Op. This Op is available by
     default in various platforms such as Servomatic, TensorFlow Serving, Vertex
     AI, and TensorFlow.js.
+
+    Note that export to Tensorflow is not yet available for Isolation Forest
+    models.
 
     Usage example:
 
@@ -1301,6 +1415,44 @@ Use `model.describe()` for more details
         the fastest engine.
     """
     raise NotImplementedError
+
+  def training_logs(self) -> List[TrainingLogEntry]:
+    """Returns the model's training logs.
+
+    The training logs contain performance metrics calculated periodically during
+    the model's training. The content of the logs depends on the model type.
+
+    The method used for evaluation depends on the model type and
+    hyperparameters. Notably, Random Forests use OOB evaluation and Gradient
+    Boosted Trees use evaluation on the validation dataset. Therefore,
+    training logs are not comparable between different model types.
+
+    For some model types, the training logs may also contain an evalution on the
+    training dataset.
+
+    Usage example:
+
+    ```python
+    import pandas as pd
+    import ydf
+
+    # Train model
+    train_ds = pd.read_csv("train.csv")
+    model = ydf.GradientBoostedTreesLearner(label="label").train(train_ds)
+
+    # Get the training logs
+    logs = model.training_logs()
+
+    # Plot the accuracy
+    plt.plot(
+        [log.iteration for log in logs],
+        [log.evaluation.accuracy for log in logs]
+    )
+    ```
+    """
+    raise NotImplementedError(
+        "Training logs are not available for this model type."
+    )
 
   def input_features(self) -> Sequence[InputFeature]:
     """Returns the input features of the model.
@@ -1811,13 +1963,32 @@ class GenericCCModel(GenericModel):
         key, self._model.data_spec(), self._model.input_features()
     )
 
+  def to_standalone_cc(
+      self,
+      name: str = "ydf_model",
+      algorithm: Literal["IF_ELSE", "ROUTING"] = "ROUTING",
+      classification_output: Literal["CLASS", "SCORE", "PROBABILITY"] = "CLASS",
+  ) -> Union[str, Dict[str, str]]:
+    options = embed_pb2.Options(
+        name=name,
+        classification_output=embed_pb2.ClassificationOutput.Enum.Value(
+            classification_output
+        ),
+        algorithm=embed_pb2.Algorithm.Enum.Value(algorithm),
+    )
+    results = self._model.EmbedModel(options)
+    if len(results) == 1:
+      return list(results.values())[0]
+    else:
+      return results
+
   # TODO: Change default value of "mode" before 1.0 release.
   def to_tensorflow_saved_model(  # pylint: disable=dangerous-default-value
       self,
       path: str,
       input_model_signature_fn: Any = None,
       *,
-      mode: Literal["keras", "tf"] = "keras",
+      mode: Literal["keras", "tf"] = "tf",
       feature_dtypes: Dict[str, "export_tf.TFDType"] = {},  # pytype: disable=name-error
       servo_api: bool = False,
       feed_example_proto: bool = False,
@@ -1839,8 +2010,7 @@ class GenericCCModel(GenericModel):
       log.warning(
           "Calling `to_tensorflow_saved_model(mode='keras', ...)`. Use"
           " `to_tensorflow_saved_model(mode='tf', ...)` instead. mode='tf' is"
-          " more efficient, has better compatibility, and offers more options."
-          " Starting June 2024, `mode='tf'` will become the default value.",
+          " more efficient, has better compatibility, and offers more options.",
           message_id=log.WarningMessage.TO_TF_SAVED_MODEL_KERAS_MODE,
       )
 

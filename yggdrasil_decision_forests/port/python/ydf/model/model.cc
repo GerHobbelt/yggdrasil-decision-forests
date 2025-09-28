@@ -169,7 +169,9 @@ void init_model(py::module_& m) {
       .def("weighted_training", &GenericCCModel::weighted_training)
       .def("set_feature_selection_logs",
            &GenericCCModel::set_feature_selection_logs)
-      .def("feature_selection_logs", &GenericCCModel::feature_selection_logs);
+      .def("feature_selection_logs", &GenericCCModel::feature_selection_logs)
+      .def("EmbedModel", WithStatusOr(&GenericCCModel::EmbedModel),
+           py::arg("options"));
 
   py::class_<BenchmarkInferenceCCResult>(m, "BenchmarkInferenceCCResult")
       .def_readwrite("duration_per_example",
@@ -189,6 +191,13 @@ void init_model(py::module_& m) {
       num_runs: Number of times the benchmark fully ran over all
         the examples of the dataset. Warmup runs are not included.
       batch_size: Number of examples per batch used when benchmarking.)";
+
+  py::class_<GBTCCTrainingLogEntry>(m, "GBTCCTrainingLogEntry")
+      .def_readonly("iteration", &GBTCCTrainingLogEntry::iteration)
+      .def_readonly("validation_evaluation",
+                    &GBTCCTrainingLogEntry::validation_evaluation)
+      .def_readonly("training_evaluation",
+                    &GBTCCTrainingLogEntry::training_evaluation);
 
   py::class_<DecisionForestCCModel,
              /*parent class*/ GenericCCModel>(m, "DecisionForestCCModel")
@@ -261,6 +270,7 @@ void init_model(py::module_& m) {
            &GradientBoostedTreesCCModel::set_initial_predictions)
       .def("validation_evaluation",
            &GradientBoostedTreesCCModel::validation_evaluation)
+      .def("training_logs", &GradientBoostedTreesCCModel::training_logs)
       .def("loss", &GradientBoostedTreesCCModel::loss)
       .def("num_trees_per_iter",
            &GradientBoostedTreesCCModel::num_trees_per_iter)

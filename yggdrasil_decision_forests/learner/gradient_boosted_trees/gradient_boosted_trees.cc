@@ -2415,7 +2415,7 @@ GradientBoostedTreesLearner::GetGenericHyperParameterSpecification() const {
         gbt_config.validation_interval_in_trees());
     param.mutable_documentation()->set_proto_path(proto_path);
     param.mutable_documentation()->set_description(
-        R"(Evaluate the model on the validation set every "validation_interval_in_trees" trees. Increasing this value reduce the cost of validation and can impact the early stopping policy (as early stopping is only tested during the validation).)");
+        R"(Evaluate the model on the validation set every "validation_interval_in_trees" trees. Increasing this value reduces the cost of validation and can impact the early stopping policy (as early stopping is only tested during the validation).)");
   }
 
   {
@@ -2608,6 +2608,10 @@ absl::StatusOr<proto::Loss> DefaultLoss(
   if (task == model::proto::Task::RANKING &&
       label_spec.type() == dataset::proto::ColumnType::NUMERICAL) {
     return proto::Loss::LAMBDA_MART_NDCG;
+  }
+
+  if (task == model::proto::Task::SURVIVAL_ANALYSIS) {
+    return proto::Loss::COX_PROPORTIONAL_HAZARD;
   }
 
   return absl::InvalidArgumentError(
